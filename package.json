@@ -1,0 +1,68 @@
+{
+  "name": "testing-mcp",
+  "version": "0.4.0",
+  "description": "A Model Context Protocol (MCP) server for Testing.",
+  "main": "./dist/index.js",
+  "type": "module",
+  "bin": {
+    "testing-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "lint": "eslint . --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest --watch",
+    "prepublishOnly": "npm run build",
+    "postinstall": "if [ \"$CI\" != \"true\" ]; then npx playwright install chromium --with-deps; fi",
+    "link": "npm link",
+    "unlink": "npm unlink",
+    "commit": "yarn git-cz"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "testing",
+    "testing-mcp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcpland/testing-mcp.git"
+  },
+  "author": "unadlib",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.16.0",
+    "playwright": "^1.54.1",
+    "playwright-core": "^1.54.1",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.15",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "commitizen": "^4.3.1",
+    "eslint": "^9.31.0",
+    "node-fetch": "^3.3.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.5",
+    "vitest": "^3.2.4"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  }
+}
