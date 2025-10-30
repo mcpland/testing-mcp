@@ -25,69 +25,6 @@ export class FileEditor {
   }
 
   /**
-   * Insert code before the connect() call
-   */
-  async insertCodeBeforeConnect(
-    testFile: string,
-    code: string,
-    options: InsertCodeOptions = {}
-  ): Promise<void> {
-    return this.withFileLock(testFile, async () => {
-      const sourceFile = this.project.addSourceFileAtPath(testFile);
-      
-      try {
-        // Find the connect() call
-        const connectCall = this.findConnectCall(sourceFile);
-        
-        if (!connectCall) {
-          throw new Error(`Could not find await connect() call in ${testFile}`);
-        }
-
-        // Get the indentation of the connect() call
-        const indent = this.getIndentation(sourceFile, connectCall.getStartLineNumber());
-        
-        // Prepare the code to insert
-        let codeToInsert = code;
-        
-        // Add markers if requested
-        if (options.useMarkers && options.stepNumber !== undefined) {
-          const comment = options.comment || `Step ${options.stepNumber}`;
-          codeToInsert = `
-${indent}// >>>> TESTING-MCP:BEGIN ${options.stepNumber} <<<<
-${indent}// ${comment}
-${this.indentCode(code, indent)}
-${indent}// >>>> TESTING-MCP:END ${options.stepNumber} <<<<
-`.trimStart();
-        } else if (options.comment) {
-          codeToInsert = `${indent}// ${options.comment}\n${this.indentCode(code, indent)}`;
-        } else {
-          codeToInsert = this.indentCode(code, indent);
-        }
-        
-        // Insert the code before connect() call
-        // The connect() call might be wrapped in an await expression
-        let connectStatement: Node | undefined = connectCall.getParent();
-        while (connectStatement && connectStatement.getKind() !== SyntaxKind.ExpressionStatement) {
-          connectStatement = connectStatement.getParent();
-        }
-        
-        if (!connectStatement) {
-          throw new Error('Could not find ExpressionStatement parent for connect() call');
-        }
-        
-        (connectStatement as ExpressionStatement).replaceWithText(`${codeToInsert}\n${indent}${connectStatement.getText()}`);
-        
-        // Save the file
-        await sourceFile.save();
-        
-        console.error(`[testing-mcp] Inserted code into ${testFile}`);
-      } finally {
-        this.project.removeSourceFile(sourceFile);
-      }
-    });
-  }
-
-  /**
    * Remove the connect() call from the test file
    */
   async removeConnect(testFile: string): Promise<void> {
