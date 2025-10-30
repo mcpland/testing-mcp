@@ -1,1 +1,18 @@
-import '@testing-library/jest-dom/vitest'
+import "@testing-library/jest-dom/vitest";
+import { beforeEach, afterEach, expect } from "vitest";
+import { connect } from "../../../src/client";
+
+const timeout = 10 * 60 * 1000;
+
+beforeEach((context) => {
+  if (!process.env.TESTING_MCP) return;
+  Object.assign(context.task, {
+    timeout,
+  });
+});
+
+afterEach(async () => {
+  if (!process.env.TESTING_MCP) return;
+  const state = expect.getState();
+  await connect({ port: 3001, filePath: state.testPath });
+}, timeout);
