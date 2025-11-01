@@ -20,13 +20,21 @@ export interface TestState {
 }
 
 export interface ConsoleLog {
-  type: 'log' | 'warn' | 'error' | 'info' | 'debug';
+  type: "log" | "warn" | "error" | "info" | "debug";
   args: any[];
   timestamp: number;
 }
 
 export interface WebSocketMessage {
-  type: 'ready' | 'connected' | 'continue' | 'close' | 'error' | 'state_update' | 'execute' | 'executed';
+  type:
+    | "ready"
+    | "connected"
+    | "continue"
+    | "close"
+    | "error"
+    | "state_update"
+    | "execute"
+    | "executed";
   data?: any;
 }
 

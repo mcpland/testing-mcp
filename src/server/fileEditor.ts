@@ -3,9 +3,15 @@
  * Uses AST manipulation to inject code into test files
  */
 
-import { Project, SourceFile, SyntaxKind, Node, ExpressionStatement } from 'ts-morph';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import {
+  Project,
+  SourceFile,
+  SyntaxKind,
+  Node,
+  ExpressionStatement,
+} from "ts-morph";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export interface InsertCodeOptions {
   comment?: string;
@@ -20,7 +26,7 @@ export class FileEditor {
   constructor() {
     this.project = new Project({
       useInMemoryFileSystem: false,
-      skipAddingFilesFromTsConfig: true
+      skipAddingFilesFromTsConfig: true,
     });
   }
 
@@ -30,10 +36,10 @@ export class FileEditor {
   async removeConnect(testFile: string): Promise<void> {
     return this.withFileLock(testFile, async () => {
       const sourceFile = this.project.addSourceFileAtPath(testFile);
-      
+
       try {
         const connectCall = this.findConnectCall(sourceFile);
-        
+
         if (!connectCall) {
           console.error(`[testing-mcp] No connect() call found in ${testFile}`);
           return;
@@ -41,16 +47,19 @@ export class FileEditor {
 
         // Remove the entire statement
         let connectStatement: Node | undefined = connectCall.getParent();
-        while (connectStatement && connectStatement.getKind() !== SyntaxKind.ExpressionStatement) {
+        while (
+          connectStatement &&
+          connectStatement.getKind() !== SyntaxKind.ExpressionStatement
+        ) {
           connectStatement = connectStatement.getParent();
         }
-        
+
         if (connectStatement) {
           (connectStatement as ExpressionStatement).remove();
         }
-        
+
         await sourceFile.save();
-        
+
         console.error(`[testing-mcp] Removed connect() from ${testFile}`);
       } finally {
         this.project.removeSourceFile(sourceFile);
@@ -63,28 +72,28 @@ export class FileEditor {
    */
   async removeMarkers(testFile: string): Promise<void> {
     return this.withFileLock(testFile, async () => {
-      const content = await fs.readFile(testFile, 'utf-8');
-      
+      const content = await fs.readFile(testFile, "utf-8");
+
       // Remove marker comments but keep the code
-      const lines = content.split('\n');
+      const lines = content.split("\n");
       const newLines: string[] = [];
       let inMarkerBlock = false;
-      
+
       for (const line of lines) {
-        if (line.includes('// >>>> TESTING-MCP:BEGIN')) {
+        if (line.includes("// >>>> TESTING-MCP:BEGIN")) {
           inMarkerBlock = true;
           continue; // Skip BEGIN marker
         }
-        if (line.includes('// >>>> TESTING-MCP:END')) {
+        if (line.includes("// >>>> TESTING-MCP:END")) {
           inMarkerBlock = false;
           continue; // Skip END marker
         }
-        
+
         // Keep all non-marker lines
         newLines.push(line);
       }
-      
-      await fs.writeFile(testFile, newLines.join('\n'), 'utf-8');
+
+      await fs.writeFile(testFile, newLines.join("\n"), "utf-8");
       console.error(`[testing-mcp] Removed markers from ${testFile}`);
     });
   }
@@ -107,31 +116,31 @@ export class FileEditor {
    * Get the generated code region (between markers)
    */
   async getGeneratedCode(testFile: string): Promise<string[]> {
-    const content = await fs.readFile(testFile, 'utf-8');
-    const lines = content.split('\n');
+    const content = await fs.readFile(testFile, "utf-8");
+    const lines = content.split("\n");
     const generatedBlocks: string[] = [];
     let currentBlock: string[] = [];
     let inMarkerBlock = false;
-    
+
     for (const line of lines) {
-      if (line.includes('// >>>> TESTING-MCP:BEGIN')) {
+      if (line.includes("// >>>> TESTING-MCP:BEGIN")) {
         inMarkerBlock = true;
         currentBlock = [];
         continue;
       }
-      if (line.includes('// >>>> TESTING-MCP:END')) {
+      if (line.includes("// >>>> TESTING-MCP:END")) {
         inMarkerBlock = false;
         if (currentBlock.length > 0) {
-          generatedBlocks.push(currentBlock.join('\n'));
+          generatedBlocks.push(currentBlock.join("\n"));
         }
         continue;
       }
-      
+
       if (inMarkerBlock) {
         currentBlock.push(line);
       }
     }
-    
+
     return generatedBlocks;
   }
 
@@ -140,21 +149,25 @@ export class FileEditor {
    */
   private findConnectCall(sourceFile: SourceFile) {
     // Look for await connect() or connect() calls
-    const awaitExpressions = sourceFile.getDescendantsOfKind(SyntaxKind.AwaitExpression);
-    
+    const awaitExpressions = sourceFile.getDescendantsOfKind(
+      SyntaxKind.AwaitExpression
+    );
+
     for (const awaitExpr of awaitExpressions) {
       const callExpr = awaitExpr.getExpression();
-      
+
       if (callExpr.getKind() === SyntaxKind.CallExpression) {
-        const callExpression = callExpr.asKindOrThrow(SyntaxKind.CallExpression);
+        const callExpression = callExpr.asKindOrThrow(
+          SyntaxKind.CallExpression
+        );
         const expression = callExpression.getExpression();
-        
-        if (expression.getText() === 'connect') {
+
+        if (expression.getText() === "connect") {
           return callExpression;
         }
       }
     }
-    
+
     return null;
   }
 
@@ -162,9 +175,9 @@ export class FileEditor {
    * Get indentation at a specific line
    */
   private getIndentation(sourceFile: SourceFile, lineNumber: number): string {
-    const line = sourceFile.getFullText().split('\n')[lineNumber - 1];
+    const line = sourceFile.getFullText().split("\n")[lineNumber - 1];
     const match = line?.match(/^(\s*)/);
-    return match ? match[1] : '';
+    return match ? match[1] : "";
   }
 
   /**
@@ -172,9 +185,9 @@ export class FileEditor {
    */
   private indentCode(code: string, indent: string): string {
     return code
-      .split('\n')
-      .map(line => line.trim() ? `${indent}${line}` : line)
-      .join('\n');
+      .split("\n")
+      .map((line) => (line.trim() ? `${indent}${line}` : line))
+      .join("\n");
   }
 
   /**
@@ -186,13 +199,13 @@ export class FileEditor {
   ): Promise<T> {
     // Normalize file path
     const normalizedPath = path.resolve(file);
-    
+
     // Wait for existing lock
     const existingLock = this.fileLocks.get(normalizedPath);
     if (existingLock) {
       await existingLock;
     }
-    
+
     // Create new lock
     const newLock = (async () => {
       try {
@@ -201,9 +214,9 @@ export class FileEditor {
         this.fileLocks.delete(normalizedPath);
       }
     })();
-    
+
     this.fileLocks.set(normalizedPath, newLock as Promise<void>);
-    
+
     return newLock;
   }
 
@@ -230,4 +243,3 @@ export class FileEditor {
     }
   }
 }
-
