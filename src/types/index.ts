@@ -2,11 +2,14 @@
  * Testing-MCP Core Types
  */
 
+export type ConnectContext = Record<string, any>;
+
 export interface ConnectOptions {
   port?: number;
   timeout?: number;
   waitForAsync?: boolean;
   filePath?: string;
+  context?: ConnectContext;
 }
 
 export interface TestState {
