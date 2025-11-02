@@ -3,7 +3,12 @@
  * This function is called in test files to connect to the MCP Server
  */
 
-import type { ConnectOptions, TestState, ConsoleLog } from "../types/index.js";
+import type {
+  ConnectOptions,
+  ConnectContext,
+  TestState,
+  ConsoleLog,
+} from "../types/index.js";
 
 // Lazy-loaded WebSocket implementation
 let WebSocketImpl: any = null;
@@ -59,6 +64,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     port = 3001,
     timeout = 300000, // 5 minutes
     waitForAsync = true,
+    context,
   } = options;
 
   try {
@@ -71,7 +77,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     const state = await collectCurrentState();
 
     // 3. Connect to MCP Server
-    await connectToServer(port, timeout, state);
+    await connectToServer(port, timeout, state, context);
   } catch (error) {
     console.error("[testing-mcp] Error:", error);
     // Don't fail the test if connection fails
@@ -201,7 +207,8 @@ function getCurrentTestName(): string {
  */
 async function handleExecuteMessage(
   ws: any,
-  data: { executeId: string; code: string }
+  data: { executeId: string; code: string },
+  injectedContext?: ConnectContext
 ): Promise<void> {
   const { executeId, code } = data;
 
@@ -216,34 +223,46 @@ async function handleExecuteMessage(
     }
 
     // Import testing-library if available
-    let screen: any;
-    let userEvent: any;
-    let fireEvent: any;
-
-    try {
-      const testingLibrary = require("@testing-library/react");
-      screen = testingLibrary.screen;
-      fireEvent = testingLibrary.fireEvent;
-    } catch {
-      console.error("[testing-mcp] @testing-library/react not available");
-    }
-
-    try {
-      const userEventLib = require("@testing-library/user-event");
-      userEvent = userEventLib.default || userEventLib;
-    } catch {
-      console.error("[testing-mcp] @testing-library/user-event not available");
-    }
-
-    // Create execution context with testing-library utilities
-    const context = {
-      screen,
-      userEvent,
-      fireEvent,
-      document,
-      window,
-      console,
+    const context: ConnectContext = {
+      ...(injectedContext ?? {}),
     };
+
+    // Ensure base browser globals are available if not injected
+    if (typeof document !== "undefined" && context.document === undefined) {
+      context.document = document;
+    }
+
+    if (typeof window !== "undefined" && context.window === undefined) {
+      context.window = window;
+    }
+
+    if (context.console === undefined) {
+      context.console = console;
+    }
+
+    // Lazily require testing-library utilities if they weren't provided
+    if (context.screen === undefined || context.fireEvent === undefined) {
+      try {
+        const testingLibrary = require("@testing-library/react");
+        if (context.screen === undefined) {
+          context.screen = testingLibrary.screen;
+        }
+        if (context.fireEvent === undefined) {
+          context.fireEvent = testingLibrary.fireEvent;
+        }
+      } catch {
+        console.error("[testing-mcp] @testing-library/react not available");
+      }
+    }
+
+    if (context.userEvent === undefined) {
+      try {
+        const userEventLib = require("@testing-library/user-event");
+        context.userEvent = userEventLib.default || userEventLib;
+      } catch {
+        console.error("[testing-mcp] @testing-library/user-event not available");
+      }
+    }
 
     // Execute the code in context
     // Using AsyncFunction to support await
@@ -301,7 +320,8 @@ async function handleExecuteMessage(
 async function connectToServer(
   port: number,
   timeout: number,
-  state: TestState
+  state: TestState,
+  injectedContext?: ConnectContext
 ): Promise<void> {
   // Get the appropriate WebSocket implementation
   const WSImpl = await getWebSocketImpl();
@@ -356,7 +376,7 @@ async function connectToServer(
           );
         } else if (message.type === "execute") {
           // Execute code and send back result
-          handleExecuteMessage(ws, message.data).catch((error) => {
+          handleExecuteMessage(ws, message.data, injectedContext).catch((error) => {
             console.error(
               "[testing-mcp] Failed to handle execute message:",
               error
