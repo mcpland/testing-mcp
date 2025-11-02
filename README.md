@@ -43,8 +43,9 @@ Import the client helper in your Vitest or Jest suites to expose the DOM state t
 
 ```ts
 // example.test.tsx
-import { render } from "@testing-library/react";
-import { connect } from "testing-mcp/client";
+import { render, screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { connect } from "testing-mcp/dist/connect.cjs";
 
 it("logs the dashboard state", async () => {
   render(<Dashboard />);
@@ -52,7 +53,7 @@ it("logs the dashboard state", async () => {
   await connect({
     port: 3001,
     filePath: import.meta.url,
-    context: { screen },
+    context: { screen, fireEvent, userEvent },
   });
 });
 ```
