@@ -49,13 +49,12 @@ import { connect } from "testing-mcp/dist/connect.cjs";
 
 it("logs the dashboard state", async () => {
   render(<Dashboard />);
-
   await connect({
     port: 3001,
     filePath: import.meta.url,
     context: { screen, fireEvent, userEvent },
   });
-});
+}, 1000 * 60 * 10);
 ```
 
 Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
