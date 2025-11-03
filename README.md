@@ -30,7 +30,7 @@ Use the provided script to start the MCP server over stdio.
 {
   "testing-mcp": {
     "command": "npx",
-    "args": ["-y", "testing-mcp"]
+    "args": ["-y", "testing-mcp@latest"]
   }
 }
 ```
@@ -47,17 +47,40 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { connect } from "testing-mcp";
 
-it("logs the dashboard state", async () => {
-  render(<Dashboard />);
-  await connect({
-    port: 3001,
-    filePath: import.meta.url,
-    context: { screen, fireEvent, userEvent },
-  });
-}, 1000 * 60 * 10);
+it(
+  "logs the dashboard state",
+  async () => {
+    render(<Dashboard />);
+    await connect({
+      port: 3001,
+      filePath: import.meta.url,
+      context: { screen, fireEvent, userEvent },
+    });
+  },
+  1000 * 60 * 10
+);
 ```
 
 Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
+
+### Environment Variables
+
+- `TESTING_MCP`: When set to `true`, the client helper attempts to open a WebSocket bridge to the MCP server. Leave it unset (the default) to disable the bridge—this is automatically the case in CI.
+- `TESTING_MCP_PORT`: Overrides the WebSocket port the MCP server listens on. Defaults to `3001`; set this if the default port is already occupied or you want multiple servers running side by side.
+
+**Custom port example**
+
+```json
+{
+  "testing-mcp": {
+    "command": "npx",
+    "args": ["-y", "testing-mcp@latest"],
+    "env": {
+      "TESTING_MCP_PORT": "4001"
+    }
+  }
+}
+```
 
 ## Architecture Overview
 
@@ -80,4 +103,3 @@ Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the 
 ## License
 
 MIT
-
