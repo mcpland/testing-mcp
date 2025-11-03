@@ -60,6 +60,7 @@ describe("client/connect", () => {
     vi.stubGlobal("console", {
       ...console,
       error: vi.fn(),
+      log: vi.fn(),
     });
   });
 
@@ -75,7 +76,7 @@ describe("client/connect", () => {
     const { connect } = await import("../src/client/connect.ts");
 
     await expect(connect({ port: 1234 })).resolves.toBeUndefined();
-    expect(console.error).toHaveBeenCalledWith(
+    expect(console.log).toHaveBeenCalledWith(
       "[testing-mcp] Skipping in CI/non-dev environment",
     );
   });
