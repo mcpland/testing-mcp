@@ -43,6 +43,7 @@ class TestingMCPServer {
       {
         capabilities: {
           tools: {},
+          logging: {},
         },
       }
     );
