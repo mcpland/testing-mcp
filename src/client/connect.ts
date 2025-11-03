@@ -8,6 +8,7 @@ import type {
   ConnectContext,
   TestState,
   ConsoleLog,
+  ContextMetadata,
 } from "../types/index.js";
 
 // Lazy-loaded WebSocket implementation
@@ -65,6 +66,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     timeout = 300000, // 5 minutes
     waitForAsync = true,
     context,
+    contextDescriptions,
   } = options;
 
   try {
@@ -73,16 +75,59 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
       await waitForAsyncOperations();
     }
 
-    // 2. Collect current state
-    const state = await collectCurrentState();
+    // 2. Collect current state (including context metadata)
+    const state = await collectCurrentState(context, contextDescriptions);
 
     // 3. Connect to MCP Server
-    await connectToServer(port, timeout, state, context);
+    await connectToServer(port, timeout, state, context, contextDescriptions);
   } catch (error) {
     console.error("[testing-mcp] Error:", error);
     // Don't fail the test if connection fails
     // (MCP Server might not be running)
   }
+}
+
+/**
+ * Collect metadata about the context object
+ * This includes type information and optional descriptions
+ */
+function collectContextMetadata(
+  context?: ConnectContext,
+  descriptions?: Record<string, string>
+): ContextMetadata[] | undefined {
+  if (!context || Object.keys(context).length === 0) {
+    return undefined;
+  }
+
+  const metadata: ContextMetadata[] = [];
+
+  for (const [key, value] of Object.entries(context)) {
+    const baseType = typeof value;
+    let signature: string | undefined;
+
+    // Try to extract function signature for functions
+    if (baseType === "function") {
+      try {
+        const fnString = value.toString();
+        // Extract parameter list from function string
+        const paramMatch = fnString.match(/\(([^)]*)\)/);
+        if (paramMatch) {
+          signature = `(${paramMatch[1]}) => ...`;
+        }
+      } catch {
+        // Ignore errors in signature extraction
+      }
+    }
+
+    metadata.push({
+      name: key,
+      type: baseType,
+      description: descriptions?.[key],
+      signature,
+    });
+  }
+
+  return metadata;
 }
 
 /**
@@ -106,9 +151,13 @@ async function waitForAsyncOperations(): Promise<void> {
 /**
  * Collect current test state
  */
-async function collectCurrentState(): Promise<TestState> {
+async function collectCurrentState(
+  context?: ConnectContext,
+  contextDescriptions?: Record<string, string>
+): Promise<TestState> {
   const testFile = getTestFile();
   const testName = getCurrentTestName();
+  const availableContext = collectContextMetadata(context, contextDescriptions);
 
   // Check if we're in a browser-like environment
   if (typeof document !== "undefined") {
@@ -118,6 +167,7 @@ async function collectCurrentState(): Promise<TestState> {
       dom: document.body.innerHTML,
       snapshot: generateSnapshot(),
       consoleLogs: getConsoleLogs(),
+      availableContext,
     };
   }
 
@@ -128,6 +178,7 @@ async function collectCurrentState(): Promise<TestState> {
     dom: "",
     snapshot: "No DOM available",
     consoleLogs: [],
+    availableContext,
   };
 }
 
@@ -208,7 +259,8 @@ function getCurrentTestName(): string {
 async function handleExecuteMessage(
   ws: any,
   data: { executeId: string; code: string },
-  injectedContext?: ConnectContext
+  injectedContext?: ConnectContext,
+  contextDescriptions?: Record<string, string>
 ): Promise<void> {
   const { executeId, code } = data;
 
@@ -254,8 +306,8 @@ async function handleExecuteMessage(
     // Wait a bit for DOM updates
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Collect new state
-    const newState = await collectCurrentState();
+    // Collect new state (including context metadata)
+    const newState = await collectCurrentState(injectedContext, contextDescriptions);
 
     // Send executed response back to server
     ws.send(
@@ -281,7 +333,7 @@ async function handleExecuteMessage(
         data: {
           executeId,
           state: {
-            ...(await collectCurrentState()),
+            ...(await collectCurrentState(injectedContext, contextDescriptions)),
             errors: [error instanceof Error ? error.message : String(error)],
           },
         },
@@ -297,7 +349,8 @@ async function connectToServer(
   port: number,
   timeout: number,
   state: TestState,
-  injectedContext?: ConnectContext
+  injectedContext?: ConnectContext,
+  contextDescriptions?: Record<string, string>
 ): Promise<void> {
   // Get the appropriate WebSocket implementation
   const WSImpl = await getWebSocketImpl();
@@ -352,7 +405,7 @@ async function connectToServer(
           );
         } else if (message.type === "execute") {
           // Execute code and send back result
-          handleExecuteMessage(ws, message.data, injectedContext).catch((error) => {
+          handleExecuteMessage(ws, message.data, injectedContext, contextDescriptions).catch((error) => {
             console.error(
               "[testing-mcp] Failed to handle execute message:",
               error

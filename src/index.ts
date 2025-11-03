@@ -169,7 +169,7 @@ class TestingMCPServer {
       {
         name: "get_current_test_state",
         description:
-          "Get the current state of a connected test, including DOM, snapshot, and console logs",
+          "Get the current state of a connected test, including DOM, snapshot, console logs, and available context APIs. The response includes 'availableContext' field which lists all APIs/variables that can be used in execute_test_step.",
         inputSchema: {
           type: "object",
           properties: {
@@ -230,14 +230,14 @@ class TestingMCPServer {
       {
         name: "execute_test_step",
         description:
-          "Execute code directly in the connected test client and get back the updated DOM state and console logs",
+          "Execute code directly in the connected test client and get back the updated DOM state and console logs. IMPORTANT: Before using this tool, call get_current_test_state first to check the 'availableContext' field, which lists all available APIs/variables you can use in your code.",
         inputSchema: {
           type: "object",
           properties: {
             code: {
               type: "string",
               description:
-                "The JavaScript/TypeScript code to execute in the test environment. Can use screen, userEvent, fireEvent, document, window, console, etc.",
+                "The JavaScript/TypeScript code to execute in the test environment. You can use any APIs/variables listed in the 'availableContext' field from get_current_test_state (e.g., screen, fireEvent, waitFor, userEvent, etc.). The code should only reference variables that are available in availableContext.",
             },
             testFile: {
               type: "string",
