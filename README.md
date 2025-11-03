@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/testing-mcp.svg)](https://www.npmjs.com/package/testing-mcp)
 ![license](https://img.shields.io/npm/l/testing-mcp)
 
-An MCP server that bridges Claude with your running tests, enabling real-time test state inspection and interactive debugging.
+An MCP server that bridges LLMs with your running tests, enabling real-time test state inspection and interactive debugging.
 
 ## Motivation
 
@@ -15,11 +15,11 @@ Writing and debugging tests traditionally involves a frustrating cycle:
 3. **Collaborate with AI** that can't see your test environment's actual state
 4. **Manually describe** DOM state and available APIs to AI assistants
 
-**Testing MCP solves these problems** by creating a live bridge between Claude and your test environment:
+**Testing MCP solves these problems** by creating a live bridge between LLMs and your test environment:
 
-- **Claude can see** the actual DOM state, console logs, and rendered output
-- **Claude can execute** code directly in your test without editing files
-- **Claude knows** exactly which testing APIs are available (screen, fireEvent, etc.)
+- **LLMs can see** the actual DOM state, console logs, and rendered output
+- **LLMs can execute** code directly in your test without editing files
+- **LLMs knows** exactly which testing APIs are available (screen, fireEvent, etc.)
 - **You iterate faster** with real-time feedback instead of blind guessing
 
 ## Features
@@ -34,7 +34,7 @@ Execute JavaScript/TypeScript directly in your running test environment. Test in
 
 ### 🧠 **Smart Context Awareness**
 
-Automatically collects and exposes available testing APIs (like `screen`, `fireEvent`, `waitFor`) with type information and descriptions. Claude knows exactly what's available and generates valid code on the first try.
+Automatically collects and exposes available testing APIs (like `screen`, `fireEvent`, `waitFor`) with type information and descriptions. LLMs knows exactly what's available and generates valid code on the first try.
 
 ```ts
 await connect({
@@ -56,7 +56,7 @@ Automatically disabled in CI environments. The `connect()` call becomes a no-op 
 
 ### 🤖 **AI-First Design**
 
-Built specifically for Claude and MCP protocol. Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
+Built specifically for LLMs and MCP protocol. Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
 
 ## Get Started
 
@@ -112,7 +112,7 @@ it(
         userEvent,
         waitFor,
       },
-      // Optional: provide descriptions to help Claude understand the APIs
+      // Optional: provide descriptions to help LLMs understand the APIs
       contextDescriptions: {
         screen: "React Testing Library screen with query methods",
         fireEvent: "Synchronous event triggering function",
@@ -129,7 +129,7 @@ Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the 
 
 ## Context and Available APIs
 
-The `connect()` function accepts a `context` object that injects APIs and variables into the test execution environment. This allows Claude to know exactly what APIs are available when generating code with `execute_test_step`.
+The `connect()` function accepts a `context` object that injects APIs and variables into the test execution environment. This allows LLMs to know exactly what APIs are available when generating code with `execute_test_step`.
 
 ### Basic Usage
 
@@ -146,7 +146,7 @@ await connect({
 
 ### Enhanced with Descriptions
 
-You can optionally provide descriptions for each context key to help Claude understand what APIs are available and how to use them:
+You can optionally provide descriptions for each context key to help LLMs understand what APIs are available and how to use them:
 
 ```ts
 await connect({
@@ -180,11 +180,11 @@ await connect({
    - Type (function, object, string, etc.)
    - Function signature (for functions)
 
-2. **Optional Descriptions**: You can provide human-readable descriptions via `contextDescriptions` to give Claude more context about each API.
+2. **Optional Descriptions**: You can provide human-readable descriptions via `contextDescriptions` to give LLMs more context about each API.
 
-3. **Available in State**: When Claude calls `get_current_test_state`, the response includes an `availableContext` field listing all available APIs with their metadata.
+3. **Available in State**: When LLMs calls `get_current_test_state`, the response includes an `availableContext` field listing all available APIs with their metadata.
 
-4. **Smart Code Generation**: Claude uses this information to generate valid `execute_test_step` code that only references available APIs.
+4. **Smart Code Generation**: LLMs uses this information to generate valid `execute_test_step` code that only references available APIs.
 
 ### Example Response
 
