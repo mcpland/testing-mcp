@@ -4,7 +4,59 @@
 [![npm](https://img.shields.io/npm/v/testing-mcp.svg)](https://www.npmjs.com/package/testing-mcp)
 ![license](https://img.shields.io/npm/l/testing-mcp)
 
-An MCP server for testing
+An MCP server that bridges Claude with your running tests, enabling real-time test state inspection and interactive debugging.
+
+## Motivation
+
+Writing and debugging tests traditionally involves a frustrating cycle:
+
+1. **Write test code** → Run tests → Read error messages → Guess what went wrong → Repeat
+2. **Debug failures** by adding `console.log` statements or using breakpoints
+3. **Collaborate with AI** that can't see your test environment's actual state
+4. **Manually describe** DOM state and available APIs to AI assistants
+
+**Testing MCP solves these problems** by creating a live bridge between Claude and your test environment:
+
+- **Claude can see** the actual DOM state, console logs, and rendered output
+- **Claude can execute** code directly in your test without editing files
+- **Claude knows** exactly which testing APIs are available (screen, fireEvent, etc.)
+- **You iterate faster** with real-time feedback instead of blind guessing
+
+## Features
+
+### 🔍 **Real-Time Test Inspection**
+
+View live DOM snapshots, console logs, and test metadata through MCP tools. No more adding temporary `console.log` statements or running tests repeatedly to see what's happening.
+
+### 🎯 **Remote Code Execution**
+
+Execute JavaScript/TypeScript directly in your running test environment. Test interactions, check DOM state, or run assertions without modifying your test files.
+
+### 🧠 **Smart Context Awareness**
+
+Automatically collects and exposes available testing APIs (like `screen`, `fireEvent`, `waitFor`) with type information and descriptions. Claude knows exactly what's available and generates valid code on the first try.
+
+```ts
+await connect({
+  context: { screen, fireEvent, waitFor },
+  contextDescriptions: {
+    screen: "React Testing Library screen with query methods",
+    fireEvent: "Function to trigger DOM events",
+  },
+});
+```
+
+### 🔄 **Session Management**
+
+Reliable WebSocket connections with session tracking, reconnection support, and automatic cleanup. Multiple tests can connect simultaneously.
+
+### 🚫 **Zero CI Overhead**
+
+Automatically disabled in CI environments. The `connect()` call becomes a no-op when `TESTING_MCP` is not set, so your tests run normally in production.
+
+### 🤖 **AI-First Design**
+
+Built specifically for Claude and MCP protocol. Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
 
 ## Get Started
 
@@ -84,10 +136,10 @@ The `connect()` function accepts a `context` object that injects APIs and variab
 ```ts
 await connect({
   context: {
-    screen,        // React Testing Library screen object
-    fireEvent,     // DOM event trigger function
-    userEvent,     // User interaction simulation
-    waitFor,       // Async waiting utility
+    screen, // React Testing Library screen object
+    fireEvent, // DOM event trigger function
+    userEvent, // User interaction simulation
+    waitFor, // Async waiting utility
   },
 });
 ```
@@ -109,10 +161,13 @@ await connect({
     },
   },
   contextDescriptions: {
-    screen: "React Testing Library screen object with query methods (getByText, findByRole, etc.)",
+    screen:
+      "React Testing Library screen object with query methods (getByText, findByRole, etc.)",
     fireEvent: "Function to trigger DOM events like click, change, etc.",
-    waitFor: "Async utility to wait for assertions - waitFor(() => expect(...).toBe(...))",
-    customHelper: "Custom helper: async (text: string) => void - Clicks a button by its text and waits",
+    waitFor:
+      "Async utility to wait for assertions - waitFor(() => expect(...).toBe(...))",
+    customHelper:
+      "Custom helper: async (text: string) => void - Clicks a button by its text and waits",
   },
 });
 ```
@@ -120,6 +175,7 @@ await connect({
 ### How It Works
 
 1. **Automatic Collection**: The client automatically collects metadata about each context key, including:
+
    - Key name
    - Type (function, object, string, etc.)
    - Function signature (for functions)
@@ -188,25 +244,27 @@ await connect({
 
 ## MCP Tools
 
-| Tool                     | Purpose                                                                                                 | Typical Usage                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `get_current_test_state` | Fetch current DOM snapshot, console logs, metadata, and **available context APIs** for a running test   | Inspect rendered output and available APIs          |
-| `finalize_test`          | Remove `connect()` and generated markers, optionally close the session                                  | Commit the test file after guidance                 |
-| `list_active_tests`      | Enumerate active WebSocket sessions with timestamps                                                     | Review which tests are connected                    |
-| `get_generated_code`     | Extract helper-generated code blocks from a test file                                                   | Audit inserted scaffolding                          |
-| `execute_test_step`      | Run code in the client context using available APIs and return the updated state                        | Trigger UI events using context-provided APIs       |
+| Tool                     | Purpose                                                                                               | Typical Usage                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `get_current_test_state` | Fetch current DOM snapshot, console logs, metadata, and **available context APIs** for a running test | Inspect rendered output and available APIs                  |
+| `finalize_test`          | Remove `connect()` and generated markers, optionally close the session                                | Commit the test file after guidance                         |
+| `list_active_tests`      | Enumerate active WebSocket sessions with timestamps                                                   | Review which tests are connected                            |
+| `get_generated_code`     | Extract helper-generated code blocks from a test file                                                 | Audit inserted scaffolding                                  |
+| `execute_test_step`      | Run code in the client context using available APIs and return the updated state                      | Trigger UI events using context-provided APIs or other APIs |
 
 ### Tool Details
 
 #### `get_current_test_state`
 
 Returns the current test state including:
+
 - **DOM snapshot**: Current rendered HTML
 - **Console logs**: Captured console output
 - **Test metadata**: Test file path, test name, session ID
 - **Available context**: List of all APIs/variables available in `execute_test_step`, including their types, signatures, and descriptions
 
 **Response includes `availableContext` field**:
+
 ```json
 {
   "availableContext": [
