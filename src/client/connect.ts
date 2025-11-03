@@ -56,7 +56,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     process.env.TESTING_MCP_FILE ?? options.filePath;
   // Check environment - skip in CI or if not explicitly enabled
   if (!process.env.TESTING_MCP || process.env.CI) {
-    console.error("[testing-mcp] Skipping in CI/non-dev environment");
+    console.log("[testing-mcp] Skipping in CI/non-dev environment");
     return;
   }
 
@@ -212,7 +212,7 @@ async function handleExecuteMessage(
 ): Promise<void> {
   const { executeId, code } = data;
 
-  console.error(
+  console.log(
     `[testing-mcp] Executing code (executeId: ${executeId}):\n${code}`
   );
 
@@ -240,30 +240,6 @@ async function handleExecuteMessage(
       context.console = console;
     }
 
-    // Lazily require testing-library utilities if they weren't provided
-    if (context.screen === undefined || context.fireEvent === undefined) {
-      try {
-        const testingLibrary = require("@testing-library/react");
-        if (context.screen === undefined) {
-          context.screen = testingLibrary.screen;
-        }
-        if (context.fireEvent === undefined) {
-          context.fireEvent = testingLibrary.fireEvent;
-        }
-      } catch {
-        console.error("[testing-mcp] @testing-library/react not available");
-      }
-    }
-
-    if (context.userEvent === undefined) {
-      try {
-        const userEventLib = require("@testing-library/user-event");
-        context.userEvent = userEventLib.default || userEventLib;
-      } catch {
-        console.error("[testing-mcp] @testing-library/user-event not available");
-      }
-    }
-
     // Execute the code in context
     // Using AsyncFunction to support await
     const AsyncFunction = Object.getPrototypeOf(
@@ -273,7 +249,7 @@ async function handleExecuteMessage(
 
     await executor(...Object.values(context));
 
-    console.error("[testing-mcp] Code executed successfully");
+    console.log("[testing-mcp] Code executed successfully");
 
     // Wait a bit for DOM updates
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -292,7 +268,7 @@ async function handleExecuteMessage(
       })
     );
 
-    console.error(
+    console.log(
       `[testing-mcp] Sent executed response (executeId: ${executeId})`
     );
   } catch (error) {
@@ -337,7 +313,7 @@ async function connectToServer(
 
     // Helper to handle both Node.js ws and browser WebSocket APIs
     const onOpen = () => {
-      console.error("[testing-mcp] Connected to server");
+      console.log("[testing-mcp] Connected to server");
 
       // Send initial state
       ws.send(
@@ -362,7 +338,7 @@ async function connectToServer(
         if (message.type === "connected") {
           // Server sends us the session ID
           sessionId = message.data?.sessionId;
-          console.error(`[testing-mcp] Received session ID: ${sessionId}`);
+          console.log(`[testing-mcp] Received session ID: ${sessionId}`);
 
           // Store session ID in process.env for potential future use
           if (sessionId) {
@@ -371,7 +347,7 @@ async function connectToServer(
         } else if (message.type === "continue") {
           // MCP Server tells us to continue
           // Keep connection alive - don't close yet
-          console.error(
+          console.log(
             "[testing-mcp] Received continue signal, keeping connection alive"
           );
         } else if (message.type === "execute") {
@@ -384,7 +360,7 @@ async function connectToServer(
           });
         } else if (message.type === "close") {
           // Explicit close signal - finalize_test was called
-          console.error(
+          console.log(
             `[testing-mcp] Closing connection [Session: ${sessionId}]`
           );
           clearTimeout(timeoutId);
