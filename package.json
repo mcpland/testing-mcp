@@ -2,7 +2,7 @@
   "name": "testing-mcp",
   "version": "0.2.1",
   "description": "A Model Context Protocol (MCP) server for Testing.",
-  "main": "./dist/index.js",
+  "main": "./dist/connect.cjs",
   "type": "module",
   "bin": {
     "testing-mcp": "dist/index.js"
