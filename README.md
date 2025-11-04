@@ -4,37 +4,96 @@
 [![npm](https://img.shields.io/npm/v/testing-mcp.svg)](https://www.npmjs.com/package/testing-mcp)
 ![license](https://img.shields.io/npm/l/testing-mcp)
 
-Write complex integration tests with AI - LLMs see your live DOM, execute code, and iterate until tests work
+Write complex integration tests with AI - AI assistants see your live page structure, execute code, and iterate until tests work
 
-## Motivation
+## Table of Contents
 
-Writing and debugging tests traditionally involves a frustrating cycle:
+- [Quick Start](#quick-start) - Get running in 3 steps
+- [Why Testing MCP](#why-testing-mcp) - Problems it solves
+- [What Testing MCP Does](#what-testing-mcp-does) - Key capabilities
+- [Installation](#installation) - Detailed setup
+- [Configure MCP Server](#configure-mcp-server) - Server configuration
+- [Connect From Tests](#connect-from-tests) - Client integration
+- [Available MCP Tools](#available-mcp-tools) - Command reference
+- [Context and Available APIs](#context-and-available-apis) - API injection
+- [Environment Variables](#environment-variables) - Configuration options
+- [How It Works](#how-it-works) - Architecture details
 
-1. **Write test code** → Run tests → Read error messages → Guess what went wrong → Repeat
-2. **Debug failures** by adding `console.log` statements or using breakpoints
-3. **Collaborate with AI** that can't see your test environment's actual state
-4. **Manually describe** DOM state and available APIs to AI assistants
+## Quick Start
 
-**Testing MCP solves these problems** by creating a live bridge between LLMs and your test environment:
+**Step 1: Install**
 
-- **LLMs can see** the actual DOM state, console logs, and rendered output
-- **LLMs can execute** code directly in your test without editing files
-- **LLMs knows** exactly which testing APIs are available (screen, fireEvent, etc.)
+```bash
+npm install -D testing-mcp
+```
+
+**Step 2: Configure Model Context Protocol (MCP) server** (e.g., in Claude Desktop config):
+
+```json
+{
+  "testing-mcp": {
+    "command": "npx",
+    "args": ["-y", "testing-mcp@latest"]
+  }
+}
+```
+
+**Step 3: Connect from your test:**
+
+```ts
+import { render, screen, fireEvent } from "@testing-library/react";
+import { connect } from "testing-mcp";
+
+it("your test", async () => {
+  render(<YourComponent />);
+  await connect({
+    context: { screen, fireEvent },
+  });
+}, 600000); // 10 minute timeout for AI interaction
+```
+
+**Step 4: Run with MCP enabled:**
+
+Prompt: 
+```
+Please run the persistent test: `TESTING_MCP=true npm test test/example.test.tsx`,
+
+Then use testing-mcp to write the test in `test/example.test.tsx` with these steps:
+1. Click the “count” button.
+2. Verify that the number on the count button becomes “1”.
+```
+
+Now your AI assistant can see the page structure, execute code in the test, and help you write assertions.
+
+## Why Testing MCP
+
+Traditional test writing is slow and frustrating:
+
+- **Write → Run → Read errors → Guess → Repeat** - endless debugging cycles
+- **Add `console.log` statements manually** - slow feedback loop
+- **AI assistants can't see your test state** - you must describe everything
+- **Must manually explain available APIs** - AI generates invalid code
+
+**Testing MCP solves this** by giving AI assistants live access to your test environment:
+
+- **AI sees** actual page structure (DOM), console logs, and rendered output
+- **AI executes** code directly in tests without editing files
+- **AI knows** exactly which testing APIs are available (screen, fireEvent, etc.)
 - **You iterate faster** with real-time feedback instead of blind guessing
 
-## Features
+## What Testing MCP Does
 
 ### 🔍 **Real-Time Test Inspection**
 
-View live DOM snapshots, console logs, and test metadata through MCP tools. No more adding temporary `console.log` statements or running tests repeatedly to see what's happening.
+**View live page structure snapshots, console logs, and test metadata** through MCP tools. No more adding temporary `console.log` statements or running tests repeatedly.
 
 ### 🎯 **Remote Code Execution**
 
-Execute JavaScript/TypeScript directly in your running test environment. Test interactions, check DOM state, or run assertions without modifying your test files.
+**Execute JavaScript/TypeScript directly in your running test environment.** Test interactions, check page state, or run assertions without modifying test files.
 
 ### 🧠 **Smart Context Awareness**
 
-Automatically collects and exposes available testing APIs (like `screen`, `fireEvent`, `waitFor`) with type information and descriptions. LLMs knows exactly what's available and generates valid code on the first try.
+**Automatically collects and exposes available testing APIs** (like `screen`, `fireEvent`, `waitFor`) with type information and descriptions. AI assistants know exactly what's available and generate valid code on the first try.
 
 ```ts
 await connect({
@@ -48,19 +107,17 @@ await connect({
 
 ### 🔄 **Session Management**
 
-Reliable WebSocket connections with session tracking, reconnection support, and automatic cleanup. Multiple tests can connect simultaneously.
+**Reliable WebSocket connections** with session tracking, reconnection support, and automatic cleanup. Multiple tests can connect simultaneously.
 
 ### 🚫 **Zero CI Overhead**
 
-Automatically disabled in CI environments. The `connect()` call becomes a no-op when `TESTING_MCP` is not set, so your tests run normally in production.
+**Automatically disabled in continuous integration (CI) environments.** The `connect()` call becomes a no-op when `TESTING_MCP` is not set, so your tests run normally in production.
 
 ### 🤖 **AI-First Design**
 
-Built specifically for LLMs and MCP protocol. Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
+**Built specifically for AI assistants and the Model Context Protocol.** Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
 
-## Get Started
-
-### Installation
+## Installation
 
 Install dependencies and build the project before launching the MCP server or consuming the client helper.
 
@@ -74,9 +131,9 @@ pnpm add -D testing-mcp
 
 **Node 18+** is required because the project uses ES modules and the WebSocket API.
 
-### Setup the MCP Server
+## Configure MCP Server
 
-Use the provided script to start the MCP server over stdio.
+Add the MCP server to your AI assistant's configuration (e.g., Claude Desktop, VSCode, etc.):
 
 ```json
 {
@@ -91,7 +148,7 @@ The server opens a WebSocket bridge on port `3001` (configurable) and registers 
 
 ## Connect From Tests
 
-Import the client helper in your Vitest or Jest suites to expose the DOM state to the MCP server.
+Import the client helper in your Vitest or Jest suites to expose the page state to the MCP server.
 
 ```ts
 // example.test.tsx
@@ -127,26 +184,75 @@ it(
 
 Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
 
+## Available MCP Tools
+
+Once connected, your AI assistant can use these tools:
+
+| Tool                     | Purpose                                                    | When to Use                                     |
+| ------------------------ | ---------------------------------------------------------- | ----------------------------------------------- |
+| `get_current_test_state` | Fetch current page structure, console logs, and APIs       | Inspect what's rendered and what APIs are available |
+| `execute_test_step`      | Run JavaScript/TypeScript code in the test environment     | Trigger interactions, check state, run assertions |
+| `finalize_test`          | Remove `connect()` call and clean up test file             | After test is complete and working              |
+| `list_active_tests`      | Show all connected tests with timestamps                   | See which tests are available                   |
+| `get_generated_code`     | Extract code blocks inserted by the helper                 | Audit what code was added                       |
+
+### `get_current_test_state`
+
+Returns the current test state including:
+
+- **Page structure snapshot**: Current rendered HTML (DOM)
+- **Console logs**: Captured console output
+- **Test metadata**: Test file path, test name, session ID
+- **Available context**: List of all APIs/variables available in `execute_test_step`, including their types, signatures, and descriptions
+
+**Response includes `availableContext` field**:
+
+```json
+{
+  "availableContext": [
+    {
+      "name": "screen",
+      "type": "object",
+      "description": "React Testing Library screen object"
+    },
+    {
+      "name": "fireEvent",
+      "type": "function",
+      "signature": "(element, event) => ...",
+      "description": "Function to trigger DOM events"
+    }
+  ]
+}
+```
+
+### `execute_test_step`
+
+Executes JavaScript/TypeScript code in the connected test client. The code can use any APIs listed in the `availableContext` field from `get_current_test_state`.
+
+**Best Practice**: Always call `get_current_test_state` first to check which APIs are available before using `execute_test_step`.
+
 ## Context and Available APIs
 
-The `connect()` function accepts a `context` object that injects APIs and variables into the test execution environment. This allows LLMs to know exactly what APIs are available when generating code with `execute_test_step`.
+**Inject testing utilities so AI knows what's available:**
+
+The `connect()` function accepts a `context` object that exposes APIs to the test execution environment. This allows AI assistants to know exactly what APIs are available when generating code.
 
 ### Basic Usage
 
 ```ts
 await connect({
   context: {
-    screen, // React Testing Library screen object
-    fireEvent, // DOM event trigger function
-    userEvent, // User interaction simulation
-    waitFor, // Async waiting utility
+    screen,      // React Testing Library queries
+    fireEvent,   // DOM event triggering
+    userEvent,   // User interaction simulation
+    waitFor,     // Async waiting utility
   },
 });
 ```
 
-### Enhanced with Descriptions
+### Adding Descriptions (Recommended)
 
-You can optionally provide descriptions for each context key to help LLMs understand what APIs are available and how to use them:
+Provide descriptions for each context key to help AI understand what's available:
 
 ```ts
 await connect({
@@ -161,66 +267,22 @@ await connect({
     },
   },
   contextDescriptions: {
-    screen:
-      "React Testing Library screen object with query methods (getByText, findByRole, etc.)",
-    fireEvent: "Function to trigger DOM events like click, change, etc.",
-    waitFor:
-      "Async utility to wait for assertions - waitFor(() => expect(...).toBe(...))",
-    customHelper:
-      "Custom helper: async (text: string) => void - Clicks a button by its text and waits",
+    screen: "Query methods like getByText, findByRole, etc.",
+    fireEvent: "Trigger DOM events: click, change, etc.",
+    waitFor: "Wait for assertions: waitFor(() => expect(...).toBe(...))",
+    customHelper: "async (text: string) => void - Clicks button by text",
   },
 });
 ```
 
-### How It Works
+**How it works:** The client collects metadata (name, type, function signature) for each context key. When AI calls `get_current_test_state`, it receives the full list of available APIs with their metadata, enabling accurate code generation.
 
-1. **Automatic Collection**: The client automatically collects metadata about each context key, including:
+## Environment Variables
 
-   - Key name
-   - Type (function, object, string, etc.)
-   - Function signature (for functions)
+- **`TESTING_MCP`**: When set to `true`, enables the WebSocket bridge to the MCP server. Leave unset to disable (automatically disabled in CI environments).
+- **`TESTING_MCP_PORT`**: Overrides the WebSocket port. Defaults to `3001`. Set this if the default port is occupied or you want multiple servers running.
 
-2. **Optional Descriptions**: You can provide human-readable descriptions via `contextDescriptions` to give LLMs more context about each API.
-
-3. **Available in State**: When LLMs calls `get_current_test_state`, the response includes an `availableContext` field listing all available APIs with their metadata.
-
-4. **Smart Code Generation**: LLMs uses this information to generate valid `execute_test_step` code that only references available APIs.
-
-### Example Response
-
-```json
-{
-  "success": true,
-  "newState": {
-    "availableContext": [
-      {
-        "name": "screen",
-        "type": "object",
-        "description": "React Testing Library screen object with query methods"
-      },
-      {
-        "name": "fireEvent",
-        "type": "function",
-        "signature": "(element, event) => ...",
-        "description": "Function to trigger DOM events"
-      },
-      {
-        "name": "customHelper",
-        "type": "function",
-        "signature": "(text) => ...",
-        "description": "Custom helper for clicking buttons"
-      }
-    ]
-  }
-}
-```
-
-### Environment Variables
-
-- `TESTING_MCP`: When set to `true`, the client helper attempts to open a WebSocket bridge to the MCP server. Leave it unset (the default) to disable the bridge—this is automatically the case in CI.
-- `TESTING_MCP_PORT`: Overrides the WebSocket port the MCP server listens on. Defaults to `3001`; set this if the default port is already occupied or you want multiple servers running side by side.
-
-**Custom port example**
+**Custom port example:**
 
 ```json
 {
@@ -234,13 +296,15 @@ await connect({
 }
 ```
 
-## Architecture Overview
+## How It Works
 
-**The MCP server listens to test events over WebSockets and responds with tooling actions.**
+Testing MCP uses a three-process architecture:
 
-- Client-side tests call `connect()` to push DOM snapshots, console logs, and metadata when they reach important checkpoints.
-- The server captures each session, exposes it through MCP tools, and can inject additional code or finalize modified files.
-- Communication stays resilient to reconnections by tracking a per-session UUID and cleaning callbacks on close.
+- **Test process** calls `connect()` to send page snapshots, console logs, and metadata to the server
+- **MCP server** manages WebSocket connections, stores session state, and exposes MCP tools via Stdio
+- **AI assistant** calls MCP tools to inspect state and execute code remotely
+
+Communication stays resilient to reconnections by tracking per-session UUIDs and cleaning up callbacks on close.
 
 ### Process Interaction Sequence Diagram
 
@@ -316,58 +380,11 @@ Protocol Summary:
 
 ### Key Interactions
 
-1. **LLM initiates**: The LLM/MCP client calls MCP tools via Stdio to interact with tests
+1. **AI initiates**: AI assistant calls MCP tools via Stdio to interact with tests
 2. **Test connects**: Test process calls `await connect()` which establishes WebSocket to MCP server
 3. **Bidirectional sync**: Test sends state updates; server executes code remotely
 4. **Session tracking**: Each test gets unique `sessionId` for managing multiple concurrent connections
-5. **Automatic cleanup**: Server uses AST manipulation to remove `connect()` calls when finalizing
-
-## MCP Tools
-
-| Tool                     | Purpose                                                                                               | Typical Usage                                               |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `get_current_test_state` | Fetch current DOM snapshot, console logs, metadata, and **available context APIs** for a running test | Inspect rendered output and available APIs                  |
-| `finalize_test`          | Remove `connect()` and generated markers, optionally close the session                                | Commit the test file after guidance                         |
-| `list_active_tests`      | Enumerate active WebSocket sessions with timestamps                                                   | Review which tests are connected                            |
-| `get_generated_code`     | Extract helper-generated code blocks from a test file                                                 | Audit inserted scaffolding                                  |
-| `execute_test_step`      | Run code in the client context using available APIs and return the updated state                      | Trigger UI events using context-provided APIs or other APIs |
-
-### Tool Details
-
-#### `get_current_test_state`
-
-Returns the current test state including:
-
-- **DOM snapshot**: Current rendered HTML
-- **Console logs**: Captured console output
-- **Test metadata**: Test file path, test name, session ID
-- **Available context**: List of all APIs/variables available in `execute_test_step`, including their types, signatures, and descriptions
-
-**Response includes `availableContext` field**:
-
-```json
-{
-  "availableContext": [
-    {
-      "name": "screen",
-      "type": "object",
-      "description": "React Testing Library screen object"
-    },
-    {
-      "name": "fireEvent",
-      "type": "function",
-      "signature": "(element, event) => ...",
-      "description": "Function to trigger DOM events"
-    }
-  ]
-}
-```
-
-#### `execute_test_step`
-
-Executes JavaScript/TypeScript code in the connected test client. The code can use any APIs listed in the `availableContext` field from `get_current_test_state`.
-
-**Best Practice**: Always call `get_current_test_state` first to check which APIs are available before using `execute_test_step`.
+5. **Automatic cleanup**: Server uses Abstract Syntax Tree (AST) manipulation to remove `connect()` calls when finalizing
 
 ## License
 
