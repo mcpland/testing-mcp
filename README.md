@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/testing-mcp.svg)](https://www.npmjs.com/package/testing-mcp)
 ![license](https://img.shields.io/npm/l/testing-mcp)
 
-An MCP server that bridges LLMs with your running tests, enabling real-time test state inspection and interactive debugging.
+Write complex integration tests with AI - LLMs see your live DOM, execute code, and iterate until tests work
 
 ## Motivation
 
