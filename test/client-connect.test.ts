@@ -170,8 +170,7 @@ describe("client/connect", () => {
     expect(process.env.TESTING_MCP_SESSION_ID).toBeUndefined();
   });
 
-  // todo: fix
-  it.skip("reports execution errors and keeps DOM snapshot available", async () => {
+  it("reports execution errors and keeps DOM snapshot available", async () => {
     process.env.TESTING_MCP = "1";
     (global as any).require = vi.fn().mockImplementation(() => {
       throw new Error("not installed");
@@ -229,7 +228,7 @@ describe("client/connect", () => {
     await connectPromise;
   });
 
-  it.skip("falls back to ws module when global WebSocket is unavailable", async () => {
+  it("falls back to ws module when global WebSocket is unavailable", async () => {
     process.env.TESTING_MCP = "1";
     delete (globalThis as any).WebSocket;
 
