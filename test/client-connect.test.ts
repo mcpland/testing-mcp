@@ -172,6 +172,7 @@ describe("client/connect", () => {
 
   it("reports execution errors and keeps DOM snapshot available", async () => {
     process.env.TESTING_MCP = "1";
+    delete process.env.CI;
     (global as any).require = vi.fn().mockImplementation(() => {
       throw new Error("not installed");
     });
@@ -230,6 +231,7 @@ describe("client/connect", () => {
 
   it("falls back to ws module when global WebSocket is unavailable", async () => {
     process.env.TESTING_MCP = "1";
+    delete process.env.CI;
     delete (globalThis as any).WebSocket;
 
     class NodeStyleWebSocket extends MockWebSocket {}
