@@ -242,6 +242,86 @@ await connect({
 - The server captures each session, exposes it through MCP tools, and can inject additional code or finalize modified files.
 - Communication stays resilient to reconnections by tracking a per-session UUID and cleaning callbacks on close.
 
+### Process Interaction Sequence Diagram
+
+The system consists of three independent processes that communicate through two different protocols:
+
+```
+┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
+│  Node.js Test    │         │   MCP Server     │         │   LLM/MCP        │
+│    Process       │         │    Process       │         │     Client       │
+└────────┬─────────┘         └────────┬─────────┘         └────────┬─────────┘
+         │                            │                            │
+         │                            │◄───────────────────────────┤
+         │                            │   1. MCP Tool Call         │
+         │                            │   (via Stdio/JSON-RPC)     │
+         │                            │                            │
+         │  2. await connect()        │                            │
+         ├───────────────────────────►│                            │
+         │   Collects DOM & context   │                            │
+         │                            │                            │
+         │  3. WebSocket: "ready"     │                            │
+         │    {dom, logs, context}    │                            │
+         ├───────────────────────────►│                            │
+         │                            │   Stores session state     │
+         │                            │                            │
+         │  4. "connected"            │                            │
+         │    {sessionId}             │                            │
+         │◄───────────────────────────┤                            │
+         │                            │                            │
+         │      Test waits...         │   5. Returns state         │
+         │                            ├───────────────────────────►│
+         │                            │   {dom, logs, context}     │
+         │                            │                            │
+         │                            │◄───────────────────────────┤
+         │                            │   6. execute_test_step     │
+         │                            │   {code, sessionId}        │
+         │                            │                            │
+         │  7. "execute"              │                            │
+         │    {code, executionId}     │                            │
+         │◄───────────────────────────┤                            │
+         │                            │                            │
+         │  Runs code with            │                            │
+         │  available context         │                            │
+         │  (screen, fireEvent...)    │                            │
+         │                            │                            │
+         │  8. "executed"             │                            │
+         │    {result, newState}      │                            │
+         ├───────────────────────────►│                            │
+         │                            │   9. Returns result        │
+         │                            ├───────────────────────────►│
+         │      Test waits...         │   {result, newState}       │
+         │                            │                            │
+         │                            │◄───────────────────────────┤
+         │                            │   10. finalize_test        │
+         │                            │                            │
+         │  11. "close"               │   Removes connect() call   │
+         │◄───────────────────────────┤   from test file (AST)     │
+         │                            │                            │
+         │  Closes WebSocket          │                            │
+         │  Test completes            │                            │
+         │                            │   12. Returns success      │
+         │                            ├───────────────────────────►│
+         ▼                            ▼                            ▼
+
+Protocol Summary:
+─────────────────
+• Test Process ←→ MCP Server: WebSocket (port 3001)
+  Message types: ready, connected, execute, executed, close
+
+• MCP Server ←→ LLM Client: Stdio/JSON-RPC (MCP Protocol)
+  Tools: get_current_test_state, execute_test_step, finalize_test,
+         list_active_tests, get_generated_code
+```
+
+### Key Interactions
+
+1. **LLM initiates**: The LLM/MCP client calls MCP tools via Stdio to interact with tests
+2. **Test connects**: Test process calls `await connect()` which establishes WebSocket to MCP server
+3. **Bidirectional sync**: Test sends state updates; server executes code remotely
+4. **Session tracking**: Each test gets unique `sessionId` for managing multiple concurrent connections
+5. **Automatic cleanup**: Server uses AST manipulation to remove `connect()` calls when finalizing
+
 ## MCP Tools
 
 | Tool                     | Purpose                                                                                               | Typical Usage                                               |
