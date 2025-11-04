@@ -8,16 +8,17 @@ Write complex integration tests with AI - AI assistants see your live page struc
 
 ## Table of Contents
 
-- [Quick Start](#quick-start) - Get running in 3 steps
-- [Why Testing MCP](#why-testing-mcp) - Problems it solves
-- [What Testing MCP Does](#what-testing-mcp-does) - Key capabilities
-- [Installation](#installation) - Detailed setup
-- [Configure MCP Server](#configure-mcp-server) - Server configuration
-- [Connect From Tests](#connect-from-tests) - Client integration
-- [Available MCP Tools](#available-mcp-tools) - Command reference
-- [Context and Available APIs](#context-and-available-apis) - API injection
-- [Environment Variables](#environment-variables) - Configuration options
-- [How It Works](#how-it-works) - Architecture details
+- [Quick Start](#quick-start)
+- [Why Testing MCP](#why-testing-mcp)
+- [What Testing MCP Does](#what-testing-mcp-does)
+- [Installation](#installation)
+- [Configure MCP Server](#configure-mcp-server)
+- [Connect From Tests](#connect-from-tests)
+- [Available MCP Tools](#available-mcp-tools)
+- [Context and Available APIs](#context-and-available-apis)
+- [Environment Variables](#environment-variables)
+- [FAQ](#faq)
+- [How It Works](#how-it-works)
 
 ## Quick Start
 
@@ -295,6 +296,131 @@ await connect({
   }
 }
 ```
+
+## FAQ
+
+### 1. How do I view MCP errors?
+
+If you see that testing-mcp fails to start in Cursor IDE, you can check detailed logs:
+
+**In Cursor IDE:** Go to **Output > MCP:user-testing-mcp** to see detailed error information.
+
+This will show you the exact error messages and help diagnose startup issues.
+
+### 2. What if the port is already in use?
+
+**Each MCP client instance needs a unique port.** If you want to run multiple testing-mcp instances simultaneously:
+
+1. Set different `TESTING_MCP_PORT` values for each instance in MCP server config.
+2. Pass the same port number to the `connect()` function in your tests
+
+```ts
+// In your test
+await connect({
+  port: 4001, // Match your custom port
+  context: { screen, fireEvent },
+});
+```
+
+**For example, kill a process using the default port (macOS):**
+
+```bash
+lsof -ti:3001 | xargs kill -9
+```
+
+### 3. Why shouldn't I use watch mode?
+
+**Testing MCP currently supports only one WebSocket connection per test at a time.**
+
+When your MCP client runs the same test command multiple times (like in watch mode), each run creates a new WebSocket connection. This can cause conflicts and unexpected behavior.
+
+**Recommendation:** Run tests individually without watch mode when using `TESTING_MCP=true`.
+
+### 4. My tests timeout immediately - what's wrong?
+
+If tests with `TESTING_MCP=true` timeout quickly, **you need to increase the test timeout.**
+
+AI assistants need time to inspect state and write tests - usually **5+ minutes minimum**.
+
+**Set timeout in your test:**
+
+```ts
+it("your test", async () => {
+  render(<YourComponent />);
+  await connect({ context: { screen, fireEvent } });
+}, 600000); // 10 minutes = 600000ms
+```
+
+### 5. Can I put `connect()` in a test setup file instead of each test?
+
+**Yes, if your tests don't automatically clear the DOM between tests.**
+
+By placing `connect()` in an `afterEach` hook in your setup file, you can make testing completely non-invasive and easier for automated test writing.
+
+**Example Jest setup file:**
+
+```ts
+// jest.setup.ts
+import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { connect } from "testing-mcp";
+
+const timeout = 10 * 60 * 1000;
+
+if (process.env.TESTING_MCP) {
+  jest.setTimeout(timeout);
+}
+
+afterEach(async () => {
+  if (!process.env.TESTING_MCP) return;
+  const state = expect.getState();
+  await connect({
+    port: 3001,
+    filePath: state.testPath,
+    context: {
+      userEvent,
+      screen,
+      fireEvent,
+    },
+  });
+}, timeout);
+```
+
+**Example Vitest setup file:**
+
+```ts
+// vitest.setup.ts
+import { beforeEach, afterEach, expect } from "vitest";
+import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { connect } from "testing-mcp";
+
+const timeout = 10 * 60 * 1000;
+
+beforeEach((context) => {
+  if (!process.env.TESTING_MCP) return;
+  Object.assign(context.task, {
+    timeout,
+  });
+});
+
+afterEach(async () => {
+  if (!process.env.TESTING_MCP) return;
+  const state = expect.getState();
+  await connect({
+    port: 3001,
+    filePath: state.testPath,
+    context: {
+      userEvent,
+      screen,
+      expect,
+      fireEvent,
+    },
+  });
+}, timeout);
+```
+
+**Important:** This approach only works if your `afterEach` hooks don't automatically remove the DOM (e.g., you're not calling `cleanup()` before `connect()`).
 
 ## How It Works
 
