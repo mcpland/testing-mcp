@@ -31,7 +31,7 @@ export class ConnectionManager {
   >();
 
   constructor(port: number = 3001) {
-    this.server = new WebSocketServer({ port });
+    this.server = new WebSocketServer({ port, host: "127.0.0.1" });
     this.server.on("connection", this.handleConnection);
     console.error(`[testing-mcp] WebSocket server listening on port ${port}`);
   }
@@ -318,6 +318,8 @@ export class ConnectionManager {
       return existing.state;
     }
 
+    let callback: StateUpdateCallback | undefined;
+
     // Wait for connection
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -332,23 +334,23 @@ export class ConnectionManager {
         reject(new Error(`Timeout waiting for test: ${key}`));
       }, timeout);
 
-      const callback: StateUpdateCallback = (state: TestState) => {
+      callback = (state: TestState) => {
         if (state.testFile === testFile && state.testName === testName) {
           clearTimeout(timeoutId);
 
           // Remove from global callbacks
           this.stateUpdateCallbacks.splice(
-            this.stateUpdateCallbacks.indexOf(callback),
+            this.stateUpdateCallbacks.indexOf(callback!),
             1
           );
 
           // Remove from pending callbacks
-          this.pendingCallbacks.delete(callback);
+          this.pendingCallbacks.delete(callback!);
 
           // Add to connection-specific callbacks for cleanup
           const connection = this.connections.get(key);
           if (connection) {
-            connection.callbacks.add(callback);
+            connection.callbacks.add(callback!);
           }
 
           resolve(state);
