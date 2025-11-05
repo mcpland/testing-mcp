@@ -357,6 +357,8 @@ it("your test", async () => {
 
 By placing `connect()` in an `afterEach` hook in your setup file, you can make testing completely non-invasive and easier for automated test writing.
 
+> If the DOM has been automatically cleared after the `afterEach` hook executes, please set `RTL_SKIP_AUTO_CLEANUP=true`.
+
 **Example Jest setup file(`setupFilesAfterEnv`)**
 
 ```ts
