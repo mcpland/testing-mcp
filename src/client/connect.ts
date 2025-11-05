@@ -307,7 +307,10 @@ async function handleExecuteMessage(
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Collect new state (including context metadata)
-    const newState = await collectCurrentState(injectedContext, contextDescriptions);
+    const newState = await collectCurrentState(
+      injectedContext,
+      contextDescriptions
+    );
 
     // Send executed response back to server
     ws.send(
@@ -333,7 +336,10 @@ async function handleExecuteMessage(
         data: {
           executeId,
           state: {
-            ...(await collectCurrentState(injectedContext, contextDescriptions)),
+            ...(await collectCurrentState(
+              injectedContext,
+              contextDescriptions
+            )),
             errors: [error instanceof Error ? error.message : String(error)],
           },
         },
@@ -405,7 +411,12 @@ async function connectToServer(
           );
         } else if (message.type === "execute") {
           // Execute code and send back result
-          handleExecuteMessage(ws, message.data, injectedContext, contextDescriptions).catch((error) => {
+          handleExecuteMessage(
+            ws,
+            message.data,
+            injectedContext,
+            contextDescriptions
+          ).catch((error) => {
             console.error(
               "[testing-mcp] Failed to handle execute message:",
               error
