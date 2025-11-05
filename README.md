@@ -357,7 +357,7 @@ it("your test", async () => {
 
 By placing `connect()` in an `afterEach` hook in your setup file, you can make testing completely non-invasive and easier for automated test writing.
 
-**Example Jest setup file:**
+**Example Jest setup file(`setupFilesAfterEnv`)**
 
 ```ts
 // jest.setup.ts
@@ -386,7 +386,7 @@ afterEach(async () => {
 }, timeout);
 ```
 
-**Example Vitest setup file:**
+**Example Vitest setup file(`setupFiles`):**
 
 ```ts
 // vitest.setup.ts
