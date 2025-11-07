@@ -103,7 +103,7 @@ describe("ConnectionManager", () => {
 
     const explicit = manager.getCurrentState(
       "/tests/sample.test.tsx",
-      "renders component",
+      "renders component"
     );
     expect(explicit?.sessionId).toBe("uuid-1");
 
@@ -118,7 +118,7 @@ describe("ConnectionManager", () => {
     const waitPromise = manager.waitForReady(
       "/tests/sample.test.tsx",
       "renders component",
-      500,
+      500
     );
 
     ws.triggerMessage({ type: "ready", data: baseState() });
@@ -139,7 +139,7 @@ describe("ConnectionManager", () => {
       "/tests/sample.test.tsx",
       "renders component",
       "console.log('hello')",
-      500,
+      500
     );
 
     expect(ws.sentMessages.length).toBe(before + 1);
@@ -181,7 +181,7 @@ describe("ConnectionManager", () => {
     const initialLength = ws.sentMessages.length;
 
     expect(
-      manager.sendContinue("/tests/sample.test.tsx", "renders component"),
+      manager.sendContinue("/tests/sample.test.tsx", "renders component")
     ).toBe(true);
     expect(ws.sentMessages.length).toBe(initialLength + 1);
     expect(JSON.parse(ws.sentMessages.at(-1)!)).toMatchObject({
@@ -189,7 +189,7 @@ describe("ConnectionManager", () => {
     });
 
     expect(
-      manager.sendError("/tests/sample.test.tsx", "renders component", "oops"),
+      manager.sendError("/tests/sample.test.tsx", "renders component", "oops")
     ).toBe(true);
     expect(ws.sentMessages.length).toBe(initialLength + 2);
     expect(JSON.parse(ws.sentMessages.at(-1)!)).toMatchObject({
@@ -197,7 +197,7 @@ describe("ConnectionManager", () => {
     });
 
     expect(
-      manager.sendClose("/tests/sample.test.tsx", "renders component"),
+      manager.sendClose("/tests/sample.test.tsx", "renders component")
     ).toBe(true);
     expect(ws.sentMessages.length).toBe(initialLength + 3);
     expect(JSON.parse(ws.sentMessages.at(-1)!)).toMatchObject({
@@ -216,7 +216,7 @@ describe("ConnectionManager", () => {
       "/tests/sample.test.tsx",
       "renders component",
       initialSession,
-      500,
+      500
     );
 
     // Simulate reconnection with new WebSocket
@@ -253,7 +253,7 @@ describe("ConnectionManager", () => {
   it("throws when execute is requested without a connection", async () => {
     const { manager } = await createManager();
     await expect(
-      manager.sendExecute("missing", "test", "code"),
+      manager.sendExecute("missing", "test", "code")
     ).rejects.toThrow("No connection found for missing:test");
   });
 });

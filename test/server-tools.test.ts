@@ -44,7 +44,7 @@ describe("MCPTools", () => {
 
     tools = new MCPTools(
       connectionManager as unknown as ConnectionManager,
-      fileEditor as unknown as FileEditor,
+      fileEditor as unknown as FileEditor
     );
   });
 
@@ -80,7 +80,7 @@ describe("MCPTools", () => {
     expect(fileEditor.removeMarkers).toHaveBeenCalledWith(baseState.testFile);
     expect(connectionManager.sendClose).toHaveBeenCalledWith(
       baseState.testFile,
-      baseState.testName,
+      baseState.testName
     );
     expect(result.success).toBe(true);
   });
@@ -152,7 +152,7 @@ describe("MCPTools", () => {
       baseState.testFile,
       baseState.testName,
       "screen.getByText('Run');",
-      30000,
+      30000
     );
     expect(result.success).toBe(true);
     expect(result.newState?.dom).toContain("updated");

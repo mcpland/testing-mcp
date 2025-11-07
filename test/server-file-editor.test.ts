@@ -56,7 +56,7 @@ describe("FileEditor", () => {
       test("no connect", () => {
         expect(true).toBe(true);
       });
-      `,
+      `
     );
 
     await expect(editor.removeConnect(testFile)).resolves.toBeUndefined();
@@ -89,9 +89,7 @@ describe("FileEditor", () => {
     const restored = await readFile(testFile, "utf-8");
     expect(restored).toContain("await connect");
 
-    await expect(
-      access(`${testFile}.backup`),
-    ).rejects.toBeInstanceOf(Error);
+    await expect(access(`${testFile}.backup`)).rejects.toBeInstanceOf(Error);
   });
 
   it("serializes concurrent operations using file locks", async () => {

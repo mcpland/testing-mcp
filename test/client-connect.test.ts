@@ -77,7 +77,7 @@ describe("client/connect", () => {
 
     await expect(connect({ port: 1234 })).resolves.toBeUndefined();
     expect(console.log).toHaveBeenCalledWith(
-      "[testing-mcp] Skipping in CI/non-dev environment",
+      "[testing-mcp] Skipping in CI/non-dev environment"
     );
   });
 
@@ -158,7 +158,7 @@ describe("client/connect", () => {
             parsed.type === "executed" &&
             parsed.data.state.dom.includes("<span>updated</span>")
           );
-        }),
+        })
       ).toBe(true);
     });
 
@@ -220,7 +220,7 @@ describe("client/connect", () => {
             parsed.type === "executed" &&
             parsed.data.state.errors?.includes("boom")
           );
-        }),
+        })
       ).toBe(true);
     });
 
