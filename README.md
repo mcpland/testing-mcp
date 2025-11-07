@@ -149,7 +149,38 @@ The server opens a WebSocket bridge on port `3001` (configurable) and registers 
 
 ## Connect From Tests
 
-Import the client helper in your Vitest or Jest suites to expose the page state to the MCP server.
+Import the client helper in your Jest or Vitest suites hook to expose the page state to the MCP server.
+
+**Example Jest setup file(`setupFilesAfterEnv`)**
+
+```ts
+// jest.setup.ts
+import { screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { connect } from "testing-mcp";
+
+const timeout = 10 * 60 * 1000;
+
+if (process.env.TESTING_MCP) {
+  jest.setTimeout(timeout);
+}
+
+afterEach(async () => {
+  if (!process.env.TESTING_MCP) return;
+  const state = expect.getState();
+  await connect({
+    port: 3001,
+    filePath: state.testPath,
+    context: {
+      userEvent,
+      screen,
+      fireEvent,
+    },
+  });
+}, timeout);
+```
+
+It also supports usage in test files:
 
 ```ts
 // example.test.tsx
