@@ -14,7 +14,7 @@ Write complex integration tests with AI - AI assistants see your live page struc
 - [Installation](#installation)
 - [Configure MCP Server](#configure-mcp-server)
 - [Connect From Tests](#connect-from-tests)
-- [Available MCP Tools](#available-mcp-tools)
+- [MCP Tools](#mcp-tools)
 - [Context and Available APIs](#context-and-available-apis)
 - [Environment Variables](#environment-variables)
 - [FAQ](#faq)
@@ -216,7 +216,9 @@ it(
 
 Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
 
-## Available MCP Tools
+> If the DOM has been automatically cleared after the `afterEach` hook executes, please set `RTL_SKIP_AUTO_CLEANUP=true`.
+
+## MCP Tools
 
 Once connected, your AI assistant can use these tools:
 
@@ -387,8 +389,6 @@ it("your test", async () => {
 **Yes, if your tests don't automatically clear the DOM between tests.**
 
 By placing `connect()` in an `afterEach` hook in your setup file, you can make testing completely non-invasive and easier for automated test writing.
-
-> If the DOM has been automatically cleared after the `afterEach` hook executes, please set `RTL_SKIP_AUTO_CLEANUP=true`.
 
 **Example Jest setup file(`setupFilesAfterEnv`)**
 
