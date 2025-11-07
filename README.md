@@ -112,7 +112,7 @@ await connect({
 
 ### 🚫 **Zero CI Overhead**
 
-**Automatically disabled in continuous integration (CI) environments.** The `connect()` call becomes a no-op when `TESTING_MCP` is not set, so your tests run normally in production.
+**Automatically disabled in continuous integration (CI) environments.** The `connect()` call becomes a no-op when `TESTING_MCP` is not set(particularly utilised hooks), so your tests run normally in production.
 
 ### 🤖 **AI-First Design**
 
