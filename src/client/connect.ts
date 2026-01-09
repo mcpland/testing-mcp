@@ -40,6 +40,72 @@ async function getWebSocketImpl(): Promise<any> {
 }
 
 /**
+ * Try to read the daemon registry file to get WebSocket port
+ * This allows automatic port discovery without configuration
+ */
+async function tryReadRegistry(): Promise<{ wsPort: number; token?: string } | null> {
+  try {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const os = await import("os");
+
+    // Determine registry path based on platform
+    let dataDir: string;
+    if (process.platform === "win32") {
+      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+      dataDir = path.join(localAppData, "testing-mcp");
+    } else {
+      dataDir = path.join(os.homedir(), ".testing-mcp");
+    }
+
+    const registryPath = path.join(dataDir, "bridge.json");
+    const content = await fs.readFile(registryPath, "utf-8");
+    const registry = JSON.parse(content);
+
+    if (typeof registry.wsPort === "number") {
+      return {
+        wsPort: registry.wsPort,
+        token: registry.token,
+      };
+    }
+
+    return null;
+  } catch {
+    // Registry file doesn't exist or is invalid
+    return null;
+  }
+}
+
+/**
+ * Resolve the WebSocket port to connect to
+ * Priority: options.port > env.TESTING_MCP_PORT > registry > default 3001
+ */
+async function resolveConnectionInfo(options: ConnectOptions): Promise<{ port: number; token?: string }> {
+  // 1. Explicit port in options
+  if (options.port) {
+    return { port: options.port };
+  }
+
+  // 2. Environment variable
+  if (process.env.TESTING_MCP_PORT) {
+    const port = parseInt(process.env.TESTING_MCP_PORT, 10);
+    if (!isNaN(port)) {
+      return { port };
+    }
+  }
+
+  // 3. Registry file (auto-discovery from daemon)
+  const registry = await tryReadRegistry();
+  if (registry) {
+    console.log(`[testing-mcp] Auto-discovered daemon on port ${registry.wsPort}`);
+    return { port: registry.wsPort, token: registry.token };
+  }
+
+  // 4. Default fallback
+  return { port: 3001 };
+}
+
+/**
  * Main connect function that connects test to MCP Server
  *
  * Usage in test:
@@ -62,7 +128,6 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
   }
 
   const {
-    port = 3001,
     timeout = 300000, // 5 minutes
     waitForAsync = true,
     context,
@@ -70,6 +135,10 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
   } = options;
 
   try {
+    // Resolve connection info (with auto-discovery)
+    const connectionInfo = await resolveConnectionInfo(options);
+    const { port, token } = connectionInfo;
+
     // 1. Wait for all async operations to complete
     if (waitForAsync) {
       await waitForAsyncOperations();
@@ -79,7 +148,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     const state = await collectCurrentState(context, contextDescriptions);
 
     // 3. Connect to MCP Server
-    await connectToServer(port, timeout, state, context, contextDescriptions);
+    await connectToServer(port, timeout, state, context, contextDescriptions, token);
   } catch (error) {
     console.error("[testing-mcp] Error:", error);
     // Don't fail the test if connection fails
@@ -356,13 +425,20 @@ async function connectToServer(
   timeout: number,
   state: TestState,
   injectedContext?: ConnectContext,
-  contextDescriptions?: Record<string, string>
+  contextDescriptions?: Record<string, string>,
+  token?: string
 ): Promise<void> {
   // Get the appropriate WebSocket implementation
   const WSImpl = await getWebSocketImpl();
 
   return new Promise((resolve, reject) => {
-    const ws = new WSImpl(`ws://localhost:${port}`);
+    // Build WebSocket URL with optional token
+    let wsUrl = `ws://localhost:${port}`;
+    if (token) {
+      wsUrl += `?token=${encodeURIComponent(token)}`;
+    }
+
+    const ws = new WSImpl(wsUrl);
     let sessionId: string | undefined;
 
     const timeoutId = setTimeout(() => {

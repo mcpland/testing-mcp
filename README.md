@@ -16,6 +16,8 @@ Write complex integration tests with AI - AI assistants see your live page struc
 - [Connect From Tests](#connect-from-tests)
 - [MCP Tools](#mcp-tools)
 - [Context and Available APIs](#context-and-available-apis)
+- [Multi-Client Architecture](#multi-client-architecture)
+- [CLI Commands](#cli-commands)
 - [Environment Variables](#environment-variables)
 - [FAQ](#faq)
 - [How It Works](#how-it-works)
@@ -55,13 +57,13 @@ it("your test", async () => {
 
 **Step 4: Run with MCP enabled:**
 
-Prompt: 
+Prompt:
 ```
 Please run the persistent test: `TESTING_MCP=true npm test test/example.test.tsx`,
 
 Then use testing-mcp to write the test in `test/example.test.tsx` with these steps:
-1. Click the “count” button.
-2. Verify that the number on the count button becomes “1”.
+1. Click the "count" button.
+2. Verify that the number on the count button becomes "1".
 ```
 
 Now your AI assistant can see the page structure, execute code in the test, and help you write assertions.
@@ -118,6 +120,10 @@ await connect({
 
 **Built specifically for AI assistants and the Model Context Protocol.** Provides structured metadata, clear tool descriptions, and predictable responses optimized for AI understanding.
 
+### 🔀 **Multi-Client Support**
+
+**Run multiple MCP clients simultaneously** (Claude Desktop, Cursor, VS Code, etc.) without port conflicts. The daemon architecture automatically manages connections and port allocation.
+
 ## Installation
 
 Install dependencies and build the project before launching the MCP server or consuming the client helper.
@@ -145,7 +151,7 @@ Add the MCP server to your AI assistant's configuration (e.g., Claude Desktop, V
 }
 ```
 
-The server opens a WebSocket bridge on port `3001` (configurable) and registers MCP tools for state inspection, file editing, and remote code execution.
+The server automatically discovers and connects to the bridge daemon, which manages WebSocket connections on dynamically assigned ports.
 
 ## Connect From Tests
 
@@ -169,7 +175,6 @@ afterEach(async () => {
   if (!process.env.TESTING_MCP) return;
   const state = expect.getState();
   await connect({
-    port: 3001,
     filePath: state.testPath,
     context: {
       userEvent,
@@ -193,7 +198,6 @@ it(
   async () => {
     render(<Dashboard />);
     await connect({
-      port: 3001,
       filePath: import.meta.url,
       context: {
         screen,
@@ -311,24 +315,125 @@ await connect({
 
 **How it works:** The client collects metadata (name, type, function signature) for each context key. When AI calls `get_current_test_state`, it receives the full list of available APIs with their metadata, enabling accurate code generation.
 
+## Multi-Client Architecture
+
+Testing MCP v0.4.0 introduces a **Daemon + Adapter architecture** that allows multiple MCP clients to work simultaneously without port conflicts.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  MCP Client A (Claude Desktop)                                  │
+│         ↓                                                       │
+│  testing-mcp serve (Adapter A) ──┐                              │
+└─────────────────────────────────────────────────────────────────┘
+                                   │
+┌─────────────────────────────────────────────────────────────────┐
+│  MCP Client B (Cursor)                                          │
+│         ↓                                                       │
+│  testing-mcp serve (Adapter B) ──┼── RPC ──→ Bridge Daemon      │
+└─────────────────────────────────────────────────────────────────┘
+                                   │          (Single Instance)
+┌─────────────────────────────────────────────────────────────────┘
+│  MCP Client C (VS Code)                                         │
+│         ↓                                                       │
+│  testing-mcp serve (Adapter C) ──┘               │              │
+└─────────────────────────────────────────────────────────────────┘
+                                                   ↓
+                                         ┌─────────────────────────┐
+                                         │  Test Client            │
+                                         │  await connect()        │
+                                         │  (Auto-discovers port)  │
+                                         └─────────────────────────┘
+```
+
+### Components
+
+| Component | Description |
+|-----------|-------------|
+| **Bridge Daemon** | Single background process that manages WebSocket connections from tests. Automatically assigns ports. |
+| **MCP Adapter** | Lightweight stdio MCP server that each client spawns. Communicates with daemon via RPC. |
+| **Registry File** | `~/.testing-mcp/bridge.json` - Contains daemon port and auth token for auto-discovery. |
+
+### Auto-Discovery
+
+Test clients automatically discover the daemon's WebSocket port by reading the registry file. No manual port configuration required:
+
+```ts
+// Port auto-discovered from ~/.testing-mcp/bridge.json
+await connect({
+  context: { screen, fireEvent },
+});
+```
+
+### Manual Daemon Management (Optional)
+
+The daemon starts automatically when needed. For manual control:
+
+```bash
+# Start daemon manually
+testing-mcp bridge
+
+# Check daemon status
+testing-mcp bridge status
+
+# Stop daemon
+testing-mcp bridge stop
+```
+
+## CLI Commands
+
+```bash
+testing-mcp [command] [options]
+
+Commands:
+  serve          Run as MCP adapter via stdio (default)
+  bridge         Start the bridge daemon
+  bridge stop    Stop the running daemon
+  bridge status  Show daemon status
+
+Options:
+  --help, -h     Show this help message
+  --version, -v  Show version number
+```
+
+### Examples
+
+```bash
+# Run as MCP server (for MCP client configuration)
+testing-mcp
+
+# Start the bridge daemon (for multi-client support)
+testing-mcp bridge
+
+# Check daemon status
+testing-mcp bridge status
+# Output:
+# Status: Running
+#   PID:           12345
+#   WebSocket:     ws://127.0.0.1:53718
+#   RPC:           ws://127.0.0.1:53719
+#   Version:       0.4.0
+#   Uptime:        5m 32s
+#   Connections:   2
+
+# Stop the daemon
+testing-mcp bridge stop
+```
+
 ## Environment Variables
 
 - **`TESTING_MCP`**: When set to `true`, enables the WebSocket bridge to the MCP server. Leave unset to disable (automatically disabled in CI environments).
-- **`TESTING_MCP_PORT`**: Overrides the WebSocket port. Defaults to `3001`. Set this if the default port is occupied or you want multiple servers running.
+- **`TESTING_MCP_PORT`**: Overrides the WebSocket port for test clients. In most cases, this is not needed as ports are auto-discovered from the daemon registry.
 
-**Custom port example:**
+### Port Resolution Priority
 
-```json
-{
-  "testing-mcp": {
-    "command": "npx",
-    "args": ["-y", "testing-mcp@latest"],
-    "env": {
-      "TESTING_MCP_PORT": "4001"
-    }
-  }
-}
-```
+The `connect()` function resolves the WebSocket port in this order:
+
+1. **Explicit `port` option**: `connect({ port: 3001 })`
+2. **Environment variable**: `TESTING_MCP_PORT=3001`
+3. **Registry file**: Auto-discovered from `~/.testing-mcp/bridge.json`
+4. **Default fallback**: `3001`
 
 ## FAQ
 
@@ -342,26 +447,27 @@ This will show you the exact error messages and help diagnose startup issues.
 
 ### 2. What if the port is already in use?
 
-**Each MCP client instance needs a unique port.** If you want to run multiple testing-mcp instances simultaneously:
+**With the new daemon architecture (v0.4.0+), port conflicts are automatically resolved.** The daemon uses dynamic port allocation (`port=0`), so it always finds an available port.
 
-1. Set different `TESTING_MCP_PORT` values for each instance in MCP server config.
-2. Pass the same port number to the `connect()` function in your tests
+If you're using an older version or manual port configuration:
 
-```ts
-// In your test
-await connect({
-  port: 4001, // Match your custom port
-  context: { screen, fireEvent },
-});
-```
-
-**For example, kill a process using the default port (macOS):**
+1. Upgrade to v0.4.0+ for automatic port management
+2. Or kill the process using the port:
 
 ```bash
+# macOS/Linux
 lsof -ti:3001 | xargs kill -9
 ```
 
-### 3. Why shouldn't I use watch mode?
+### 3. Can I run multiple MCP clients simultaneously?
+
+**Yes!** The daemon architecture (v0.4.0+) supports multiple MCP clients:
+
+- Claude Desktop, Cursor, VS Code can all connect at the same time
+- Each adapter connects to the shared daemon via RPC
+- No port conflicts - the daemon handles all connections
+
+### 4. Why shouldn't I use watch mode?
 
 **Testing MCP currently supports only one WebSocket connection per test at a time.**
 
@@ -369,7 +475,7 @@ When your MCP client runs the same test command multiple times (like in watch mo
 
 **Recommendation:** Run tests individually without watch mode when using `TESTING_MCP=true`.
 
-### 4. My tests timeout immediately - what's wrong?
+### 5. My tests timeout immediately - what's wrong?
 
 If tests with `TESTING_MCP=true` timeout quickly, **you need to increase the test timeout.**
 
@@ -384,7 +490,7 @@ it("your test", async () => {
 }, 600000); // 10 minutes = 600000ms
 ```
 
-### 5. Can I put `connect()` in a test setup file instead of each test?
+### 6. Can I put `connect()` in a test setup file instead of each test?
 
 **Yes, if your tests don't automatically clear the DOM between tests.**
 
@@ -408,7 +514,6 @@ afterEach(async () => {
   if (!process.env.TESTING_MCP) return;
   const state = expect.getState();
   await connect({
-    port: 3001,
     filePath: state.testPath,
     context: {
       userEvent,
@@ -441,7 +546,6 @@ afterEach(async () => {
   if (!process.env.TESTING_MCP) return;
   const state = expect.getState();
   await connect({
-    port: 3001,
     filePath: state.testPath,
     context: {
       userEvent,
@@ -455,95 +559,104 @@ afterEach(async () => {
 
 **Important:** This approach only works if your `afterEach` hooks don't automatically remove the DOM (e.g., you're not calling `cleanup()` before `connect()`).
 
+### 7. Where is the daemon registry file located?
+
+The registry file stores daemon connection info for auto-discovery:
+
+| Platform | Path |
+|----------|------|
+| macOS/Linux | `~/.testing-mcp/bridge.json` |
+| Windows | `%LOCALAPPDATA%\testing-mcp\bridge.json` |
+
+**Example registry content:**
+
+```json
+{
+  "pid": 12345,
+  "wsPort": 53718,
+  "rpcPort": 53719,
+  "token": "abc123...",
+  "startedAt": "2024-01-15T10:30:00.000Z",
+  "version": "0.4.0",
+  "protocol": 1
+}
+```
+
 ## How It Works
 
-Testing MCP uses a three-process architecture:
+Testing MCP uses a **Daemon + Adapter architecture** for robust multi-client support:
 
-- **Test process** calls `connect()` to send page snapshots, console logs, and metadata to the server
-- **MCP server** manages WebSocket connections, stores session state, and exposes MCP tools via Stdio
-- **AI assistant** calls MCP tools to inspect state and execute code remotely
-
-Communication stays resilient to reconnections by tracking per-session UUIDs and cleaning up callbacks on close.
-
-### Process Interaction Sequence Diagram
-
-The system consists of three independent processes that communicate through two different protocols:
+### Architecture Overview
 
 ```
 ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
-│  Node.js Test    │         │   MCP Server     │         │   LLM/MCP        │
-│    Process       │         │    Process       │         │     Client       │
+│  Node.js Test    │         │  Bridge Daemon   │         │   LLM/MCP        │
+│    Process       │         │    (Singleton)   │         │     Client       │
 └────────┬─────────┘         └────────┬─────────┘         └────────┬─────────┘
          │                            │                            │
-         │                            │◄───────────────────────────┤
-         │                            │   1. MCP Tool Call         │
-         │                            │   (via Stdio/JSON-RPC)     │
+         │                            │         ┌──────────────────┤
+         │                            │         │  MCP Adapter     │
+         │                            │◄────────┤  (per client)    │
+         │                            │   RPC   └──────────────────┘
          │                            │                            │
-         │  2. await connect()        │                            │
+         │  1. await connect()        │                            │
          ├───────────────────────────►│                            │
-         │   Collects DOM & context   │                            │
+         │   (Auto-discovers port)    │                            │
          │                            │                            │
-         │  3. WebSocket: "ready"     │                            │
-         │    {dom, logs, context}    │                            │
-         ├───────────────────────────►│                            │
-         │                            │   Stores session state     │
+         │  2. WebSocket: "ready"     │   3. MCP Tool Call         │
+         │    {dom, logs, context}    │      (Stdio/JSON-RPC)      │
+         ├───────────────────────────►│◄───────────────────────────┤
          │                            │                            │
-         │  4. "connected"            │                            │
-         │    {sessionId}             │                            │
+         │  4. "connected"            │   5. RPC: getCurrentState  │
+         │    {sessionId}             │◄───────────────────────────┤
          │◄───────────────────────────┤                            │
+         │                            │   6. Returns state         │
+         │      Test waits...         ├───────────────────────────►│
          │                            │                            │
-         │      Test waits...         │   5. Returns state         │
-         │                            ├───────────────────────────►│
-         │                            │   {dom, logs, context}     │
-         │                            │                            │
-         │                            │◄───────────────────────────┤
-         │                            │   6. execute_test_step     │
-         │                            │   {code, sessionId}        │
-         │                            │                            │
-         │  7. "execute"              │                            │
+         │                            │   7. RPC: sendExecute      │
+         │  8. "execute"              │◄───────────────────────────┤
          │    {code, executionId}     │                            │
          │◄───────────────────────────┤                            │
          │                            │                            │
-         │  Runs code with            │                            │
-         │  available context         │                            │
-         │  (screen, fireEvent...)    │                            │
+         │  Runs code with context    │                            │
          │                            │                            │
-         │  8. "executed"             │                            │
-         │    {result, newState}      │                            │
-         ├───────────────────────────►│                            │
-         │                            │   9. Returns result        │
-         │                            ├───────────────────────────►│
-         │      Test waits...         │   {result, newState}       │
+         │  9. "executed"             │                            │
+         │    {result, newState}      │   10. Returns result       │
+         ├───────────────────────────►├───────────────────────────►│
          │                            │                            │
-         │                            │◄───────────────────────────┤
-         │                            │   10. finalize_test        │
+         │                            │   11. finalize_test        │
+         │  12. "close"               │◄───────────────────────────┤
+         │◄───────────────────────────┤   (Adapter edits file)     │
          │                            │                            │
-         │  11. "close"               │   Removes connect() call   │
-         │◄───────────────────────────┤   from test file (AST)     │
-         │                            │                            │
-         │  Closes WebSocket          │                            │
-         │  Test completes            │                            │
-         │                            │   12. Returns success      │
+         │  Test completes            │   13. Returns success      │
          │                            ├───────────────────────────►│
          ▼                            ▼                            ▼
-
-Protocol Summary:
-─────────────────
-• Test Process ←→ MCP Server: WebSocket (port 3001)
-  Message types: ready, connected, execute, executed, close
-
-• MCP Server ←→ LLM Client: Stdio/JSON-RPC (MCP Protocol)
-  Tools: get_current_test_state, execute_test_step, finalize_test,
-         list_active_tests, get_generated_code
 ```
 
-### Key Interactions
+### Key Components
 
-1. **AI initiates**: AI assistant calls MCP tools via Stdio to interact with tests
-2. **Test connects**: Test process calls `await connect()` which establishes WebSocket to MCP server
-3. **Bidirectional sync**: Test sends state updates; server executes code remotely
-4. **Session tracking**: Each test gets unique `sessionId` for managing multiple concurrent connections
-5. **Automatic cleanup**: Server uses Abstract Syntax Tree (AST) manipulation to remove `connect()` calls when finalizing
+| Component | Responsibility |
+|-----------|----------------|
+| **Bridge Daemon** | Singleton process managing WebSocket connections, session state, and code execution |
+| **MCP Adapter** | Per-client stdio MCP server that forwards tool calls to daemon via RPC |
+| **Registry File** | Stores daemon port/token for auto-discovery by adapters and test clients |
+| **Test Client** | `connect()` function that establishes WebSocket to daemon |
+
+### Protocol Summary
+
+| Communication | Protocol | Purpose |
+|---------------|----------|---------|
+| Test ↔ Daemon | WebSocket | State sync, code execution |
+| Adapter ↔ Daemon | WebSocket RPC | Tool call forwarding |
+| Client ↔ Adapter | Stdio JSON-RPC | MCP protocol |
+
+### Benefits of This Architecture
+
+1. **No port conflicts**: Daemon uses dynamic port allocation
+2. **Multi-client support**: Multiple AI assistants can connect simultaneously
+3. **Auto-discovery**: Test clients find daemon automatically via registry
+4. **Graceful lifecycle**: Daemon starts on-demand, can be managed manually
+5. **Security**: Token-based authentication between components
 
 ## License
 

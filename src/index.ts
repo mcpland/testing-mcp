@@ -1,318 +1,254 @@
 #!/usr/bin/env node
 
 /**
- * Testing-MCP Server
- * Main entry point for the MCP server
+ * Testing-MCP CLI
+ * Main entry point supporting multiple modes:
+ * - serve (default): Run as MCP adapter via stdio
+ * - bridge: Run as daemon (WebSocket + RPC server)
+ * - bridge stop: Stop running daemon
+ * - bridge status: Show daemon status
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-
-import { ConnectionManager } from "./server/connectionManager.js";
-import { FileEditor } from "./server/fileEditor.js";
-import {
-  MCPTools,
-  GetCurrentStateSchema,
-  FinalizeTestSchema,
-  ExecuteTestStepSchema,
-} from "./server/tools.js";
-
-// Configuration
-const WEBSOCKET_PORT = parseInt(process.env.TESTING_MCP_PORT || "3001", 10);
+import { runAdapter } from "./adapter/index.js";
+import { runDaemon, Daemon } from "./daemon/index.js";
+import { isDaemonRunning, readRegistry, deleteRegistry } from "./daemon/registry.js";
+import { VERSION } from "./shared/constants.js";
+import { createBridgeClient } from "./adapter/bridgeClient.js";
 
 /**
- * Main server class
+ * Print help message
  */
-class TestingMCPServer {
-  private server: Server;
-  private connectionManager: ConnectionManager;
-  private fileEditor: FileEditor;
-  private mcpTools: MCPTools;
+function printHelp(): void {
+  console.log(`
+testing-mcp v${VERSION}
 
-  constructor() {
-    this.server = new Server(
-      {
-        name: "testing-mcp",
-        version: "0.3.0",
-      },
-      {
-        capabilities: {
-          tools: {},
-          logging: {},
-        },
-      }
-    );
+Usage:
+  testing-mcp [command] [options]
 
-    // Initialize components
-    this.connectionManager = new ConnectionManager(WEBSOCKET_PORT);
-    this.fileEditor = new FileEditor();
-    this.mcpTools = new MCPTools(this.connectionManager, this.fileEditor);
+Commands:
+  serve          Run as MCP adapter via stdio (default)
+  bridge         Start the bridge daemon
+  bridge stop    Stop the running daemon
+  bridge status  Show daemon status
 
-    this.setupHandlers();
-    this.setupErrorHandling();
+Options:
+  --help, -h     Show this help message
+  --version, -v  Show version number
+
+Examples:
+  # Run as MCP server (for MCP client configuration)
+  testing-mcp
+
+  # Start the bridge daemon (for multi-client support)
+  testing-mcp bridge
+
+  # Check daemon status
+  testing-mcp bridge status
+
+  # Stop the daemon
+  testing-mcp bridge stop
+
+Architecture:
+  The new daemon architecture supports multiple MCP clients simultaneously:
+
+  1. The 'bridge' daemon manages all WebSocket connections from tests
+  2. Each 'serve' instance (MCP adapter) connects to the daemon via RPC
+  3. Test clients auto-discover the daemon's port via registry file
+
+  This allows multiple AI assistants to work with tests concurrently
+  without port conflicts.
+`);
+}
+
+/**
+ * Print version
+ */
+function printVersion(): void {
+  console.log(`testing-mcp v${VERSION}`);
+}
+
+/**
+ * Handle 'bridge' subcommand
+ */
+async function handleBridge(args: string[]): Promise<void> {
+  const subCommand = args[0];
+
+  switch (subCommand) {
+    case "stop":
+      await handleBridgeStop();
+      break;
+
+    case "status":
+      await handleBridgeStatus();
+      break;
+
+    case undefined:
+    case "start":
+      // Start daemon
+      await runDaemon({ foreground: true });
+      break;
+
+    default:
+      console.error(`Unknown bridge subcommand: ${subCommand}`);
+      console.error("Use 'testing-mcp bridge --help' for usage information");
+      process.exit(1);
+  }
+}
+
+/**
+ * Stop the running daemon
+ */
+async function handleBridgeStop(): Promise<void> {
+  const registry = await readRegistry();
+
+  if (!registry) {
+    console.log("No daemon is running");
+    return;
   }
 
-  /**
-   * Setup MCP request handlers
-   */
-  private setupHandlers() {
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: this.getToolDefinitions(),
-      };
-    });
+  try {
+    // Try to gracefully shutdown via RPC
+    const client = await createBridgeClient({ autoStartDaemon: false });
+    await client.shutdown();
+    console.log("Daemon shutdown requested");
 
-    // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
+    // Wait a moment for shutdown
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
+    // Verify shutdown
+    const stillRunning = await isDaemonRunning();
+    if (stillRunning) {
+      console.log("Daemon is still running, sending SIGTERM...");
       try {
-        switch (name) {
-          case "get_current_test_state": {
-            const params = GetCurrentStateSchema.parse(args);
-            const result = await this.mcpTools.getCurrentTestState(params);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "finalize_test": {
-            const params = FinalizeTestSchema.parse(args);
-            const result = await this.mcpTools.finalizeTest(params);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "list_active_tests": {
-            const result = await this.mcpTools.listActiveTests();
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "get_generated_code": {
-            const testFile = (args as any)?.testFile;
-            if (!testFile) {
-              throw new Error("testFile parameter is required");
-            }
-            const result = await this.mcpTools.getGeneratedCode(testFile);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "execute_test_step": {
-            const params = ExecuteTestStepSchema.parse(args);
-            const result = await this.mcpTools.executeTestStep(params);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
-      } catch (error) {
-        console.error(`[testing-mcp] Error handling tool call ${name}:`, error);
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                success: false,
-                error: error instanceof Error ? error.message : "Unknown error",
-              }),
-            },
-          ],
-          isError: true,
-        };
+        process.kill(registry.pid, "SIGTERM");
+      } catch {
+        // Process may already be gone
       }
-    });
-  }
+    }
 
-  /**
-   * Get tool definitions for MCP
-   */
-  private getToolDefinitions(): Tool[] {
-    return [
-      {
-        name: "get_current_test_state",
-        description:
-          "Get the current state of a connected test, including DOM, snapshot, console logs, and available context APIs. The response includes 'availableContext' field which lists all APIs/variables that can be used in execute_test_step.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            testFile: {
-              type: "string",
-              description: "Optional: specific test file path",
-            },
-            testName: {
-              type: "string",
-              description: "Optional: specific test name",
-            },
-          },
-        },
-      },
-      {
-        name: "finalize_test",
-        description:
-          "Finalize the test by removing connect() call and optionally cleaning up markers",
-        inputSchema: {
-          type: "object",
-          properties: {
-            testFile: {
-              type: "string",
-              description: "Path to the test file",
-            },
-            removeMarkers: {
-              type: "boolean",
-              description:
-                "Whether to remove TESTING-MCP markers (default: true)",
-              default: true,
-            },
-          },
-          required: ["testFile"],
-        },
-      },
-      {
-        name: "list_active_tests",
-        description: "List all currently connected test processes",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_generated_code",
-        description: "Get all generated code blocks from a test file",
-        inputSchema: {
-          type: "object",
-          properties: {
-            testFile: {
-              type: "string",
-              description: "Path to the test file",
-            },
-          },
-          required: ["testFile"],
-        },
-      },
-      {
-        name: "execute_test_step",
-        description:
-          "Execute code directly in the connected test client and get back the updated DOM state and console logs. IMPORTANT: Before using this tool, call get_current_test_state first to check the 'availableContext' field, which lists all available APIs/variables you can use in your code.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            code: {
-              type: "string",
-              description:
-                "The JavaScript/TypeScript code to execute in the test environment. You can use any APIs/variables listed in the 'availableContext' field from get_current_test_state (e.g., screen, fireEvent, waitFor, userEvent, etc.). The code should only reference variables that are available in availableContext.",
-            },
-            testFile: {
-              type: "string",
-              description:
-                "Optional: specific test file (uses current if not provided)",
-            },
-            testName: {
-              type: "string",
-              description:
-                "Optional: specific test name (uses current if not provided)",
-            },
-          },
-          required: ["code"],
-        },
-      },
-    ];
-  }
-
-  /**
-   * Setup error handling
-   */
-  private setupErrorHandling() {
-    process.on("SIGINT", async () => {
-      console.error("\n[testing-mcp] Shutting down...");
-      await this.shutdown();
-      process.exit(0);
-    });
-
-    process.on("SIGTERM", async () => {
-      console.error("\n[testing-mcp] Shutting down...");
-      await this.shutdown();
-      process.exit(0);
-    });
-  }
-
-  /**
-   * Start the server
-   */
-  async start() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("[testing-mcp] Server started successfully");
-    console.error(
-      `[testing-mcp] WebSocket server listening on port ${WEBSOCKET_PORT}`
-    );
-    console.error("[testing-mcp] Ready to accept test connections");
-  }
-
-  /**
-   * Shutdown the server
-   */
-  async shutdown() {
+    // Clean up registry
+    await deleteRegistry();
+    console.log("Daemon stopped");
+  } catch (error) {
+    // RPC failed, try direct kill
+    console.log("Daemon not responding to RPC, sending SIGTERM...");
     try {
-      await this.connectionManager.close();
-      await this.server.close();
-      console.error("[testing-mcp] Server shut down successfully");
-    } catch (error) {
-      console.error("[testing-mcp] Error during shutdown:", error);
+      process.kill(registry.pid, "SIGTERM");
+      await deleteRegistry();
+      console.log("Daemon stopped");
+    } catch {
+      console.error("Failed to stop daemon");
+      process.exit(1);
     }
   }
 }
 
 /**
- * Main entry point
+ * Show daemon status
  */
-async function main() {
+async function handleBridgeStatus(): Promise<void> {
+  const registry = await isDaemonRunning();
+
+  if (!registry) {
+    console.log("Status: Not running");
+    console.log("");
+    console.log("Start the daemon with: testing-mcp bridge");
+    return;
+  }
+
+  console.log("Status: Running");
+  console.log("");
+  console.log(`  PID:           ${registry.pid}`);
+  console.log(`  WebSocket:     ws://127.0.0.1:${registry.wsPort}`);
+  console.log(`  RPC:           ws://127.0.0.1:${registry.rpcPort}`);
+  console.log(`  Version:       ${registry.version}`);
+  console.log(`  Started:       ${registry.startedAt}`);
+  console.log(`  Protocol:      v${registry.protocol}`);
+
+  // Try to get more info from daemon
   try {
-    const server = new TestingMCPServer();
-    await server.start();
-  } catch (error) {
-    console.error("[testing-mcp] Fatal error:", error);
-    process.exit(1);
+    const client = await createBridgeClient({ autoStartDaemon: false });
+    const ping = await client.ping();
+    const { connections } = await client.listConnections();
+
+    console.log("");
+    console.log(`  Uptime:        ${formatUptime(ping.uptime)}`);
+    console.log(`  Connections:   ${connections.length}`);
+
+    if (connections.length > 0) {
+      console.log("");
+      console.log("  Active tests:");
+      for (const conn of connections) {
+        console.log(`    - ${conn.testFile}: ${conn.testName}`);
+      }
+    }
+
+    client.disconnect();
+  } catch {
+    // Could not connect to daemon for additional info
   }
 }
 
-// Start the server
-main();
+/**
+ * Format uptime in human-readable format
+ */
+function formatUptime(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${days}d ${hours % 24}h ${minutes % 60}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  // Handle flags
+  if (command === "--help" || command === "-h") {
+    printHelp();
+    return;
+  }
+
+  if (command === "--version" || command === "-v") {
+    printVersion();
+    return;
+  }
+
+  // Handle commands
+  switch (command) {
+    case "serve":
+    case undefined:
+      // Default: run as MCP adapter
+      await runAdapter();
+      break;
+
+    case "bridge":
+      await handleBridge(args.slice(1));
+      break;
+
+    default:
+      console.error(`Unknown command: ${command}`);
+      console.error("Use 'testing-mcp --help' for usage information");
+      process.exit(1);
+  }
+}
+
+// Run main
+main().catch((error) => {
+  console.error("[testing-mcp] Fatal error:", error);
+  process.exit(1);
+});
