@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { FileEditor } from "../src/server/fileEditor.ts";
+import { FileEditor } from "../src/adapter/fileEditor.ts";
 
 const baseTestContent = `
 import { connect } from "testing-mcp/client";

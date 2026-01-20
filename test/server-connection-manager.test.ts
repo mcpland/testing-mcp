@@ -68,7 +68,7 @@ describe("ConnectionManager", () => {
 
   async function createManager() {
     const { ConnectionManager } = await import(
-      "../src/server/connectionManager.ts"
+      "../src/daemon/connectionManager.ts"
     );
     const manager = new ConnectionManager(9000);
     const server = FakeWebSocketServer.instances.at(-1)!;
