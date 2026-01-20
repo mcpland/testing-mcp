@@ -40,25 +40,45 @@ async function getWebSocketImpl(): Promise<any> {
 }
 
 /**
+ * Get the registry file path
+ */
+async function getRegistryPath(): Promise<string> {
+  const path = await import("path");
+  const os = await import("os");
+
+  // Determine registry path based on platform
+  let dataDir: string;
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+    dataDir = path.join(localAppData, "testing-mcp");
+  } else {
+    dataDir = path.join(os.homedir(), ".testing-mcp");
+  }
+
+  return path.join(dataDir, "bridge.json");
+}
+
+/**
+ * Check if a process is running
+ */
+function isProcessRunning(pid: number): boolean {
+  try {
+    // Sending signal 0 checks if process exists without killing it
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Try to read the daemon registry file to get WebSocket port
  * This allows automatic port discovery without configuration
  */
-async function tryReadRegistry(): Promise<{ wsPort: number; token?: string } | null> {
+async function tryReadRegistry(): Promise<{ wsPort: number; token?: string; pid?: number } | null> {
   try {
     const fs = await import("fs/promises");
-    const path = await import("path");
-    const os = await import("os");
-
-    // Determine registry path based on platform
-    let dataDir: string;
-    if (process.platform === "win32") {
-      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-      dataDir = path.join(localAppData, "testing-mcp");
-    } else {
-      dataDir = path.join(os.homedir(), ".testing-mcp");
-    }
-
-    const registryPath = path.join(dataDir, "bridge.json");
+    const registryPath = await getRegistryPath();
     const content = await fs.readFile(registryPath, "utf-8");
     const registry = JSON.parse(content);
 
@@ -66,6 +86,7 @@ async function tryReadRegistry(): Promise<{ wsPort: number; token?: string } | n
       return {
         wsPort: registry.wsPort,
         token: registry.token,
+        pid: registry.pid,
       };
     }
 
@@ -77,10 +98,49 @@ async function tryReadRegistry(): Promise<{ wsPort: number; token?: string } | n
 }
 
 /**
- * Resolve the WebSocket port to connect to
- * Priority: options.port > env.TESTING_MCP_PORT > registry > default 3001
+ * Wait for daemon to be ready (registry file appears with valid process)
+ * Returns registry info when daemon is ready, or null if timeout
  */
-async function resolveConnectionInfo(options: ConnectOptions): Promise<{ port: number; token?: string }> {
+async function waitForDaemon(timeout: number = 60000): Promise<{ wsPort: number; token?: string } | null> {
+  const startTime = Date.now();
+  const pollInterval = 500; // Check every 500ms
+
+  console.log(`[testing-mcp] Waiting for daemon to be ready (timeout: ${timeout}ms)...`);
+
+  while (Date.now() - startTime < timeout) {
+    const registry = await tryReadRegistry();
+
+    if (registry && registry.pid) {
+      // Verify the process is still running
+      if (isProcessRunning(registry.pid)) {
+        console.log(`[testing-mcp] Daemon is ready (pid: ${registry.pid}, port: ${registry.wsPort})`);
+        return {
+          wsPort: registry.wsPort,
+          token: registry.token,
+        };
+      } else {
+        // Registry exists but process is dead, wait for it to be cleaned up
+        console.log(`[testing-mcp] Daemon process ${registry.pid} is not running, waiting...`);
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  }
+
+  return null;
+}
+
+/**
+ * Resolve the WebSocket port to connect to
+ * Priority: options.port > env.TESTING_MCP_PORT > registry (with waiting) > error
+ *
+ * @param options Connect options
+ * @param waitTimeout Timeout for waiting for daemon (default: 60 seconds)
+ */
+async function resolveConnectionInfo(
+  options: ConnectOptions,
+  waitTimeout: number = 60000
+): Promise<{ port: number; token?: string }> {
   // 1. Explicit port in options
   if (options.port) {
     return { port: options.port };
@@ -96,13 +156,25 @@ async function resolveConnectionInfo(options: ConnectOptions): Promise<{ port: n
 
   // 3. Registry file (auto-discovery from daemon)
   const registry = await tryReadRegistry();
-  if (registry) {
+  if (registry && registry.pid && isProcessRunning(registry.pid)) {
     console.log(`[testing-mcp] Auto-discovered daemon on port ${registry.wsPort}`);
     return { port: registry.wsPort, token: registry.token };
   }
 
-  // 4. Default fallback
-  return { port: 3001 };
+  // 4. Wait for daemon to be ready
+  console.log("[testing-mcp] No daemon found, waiting for daemon to start...");
+  console.log("[testing-mcp] Please start the MCP adapter (e.g., via Claude Desktop or Cursor)");
+
+  const daemonInfo = await waitForDaemon(waitTimeout);
+  if (daemonInfo) {
+    return { port: daemonInfo.wsPort, token: daemonInfo.token };
+  }
+
+  // 5. Timeout - throw error instead of silently failing
+  throw new Error(
+    `[testing-mcp] Timeout waiting for daemon. Please ensure the MCP adapter is running.\n` +
+    `Hint: Start the adapter via Claude Desktop, Cursor, or run 'npx testing-mcp bridge' manually.`
+  );
 }
 
 /**
@@ -132,28 +204,24 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     waitForAsync = true,
     context,
     contextDescriptions,
+    daemonWaitTimeout = 60000, // 60 seconds to wait for daemon
   } = options;
 
-  try {
-    // Resolve connection info (with auto-discovery)
-    const connectionInfo = await resolveConnectionInfo(options);
-    const { port, token } = connectionInfo;
+  // Resolve connection info (with auto-discovery and waiting for daemon)
+  // This will block until daemon is ready or timeout
+  const connectionInfo = await resolveConnectionInfo(options, daemonWaitTimeout);
+  const { port, token } = connectionInfo;
 
-    // 1. Wait for all async operations to complete
-    if (waitForAsync) {
-      await waitForAsyncOperations();
-    }
-
-    // 2. Collect current state (including context metadata)
-    const state = await collectCurrentState(context, contextDescriptions);
-
-    // 3. Connect to MCP Server
-    await connectToServer(port, timeout, state, context, contextDescriptions, token);
-  } catch (error) {
-    console.error("[testing-mcp] Error:", error);
-    // Don't fail the test if connection fails
-    // (MCP Server might not be running)
+  // 1. Wait for all async operations to complete
+  if (waitForAsync) {
+    await waitForAsyncOperations();
   }
+
+  // 2. Collect current state (including context metadata)
+  const state = await collectCurrentState(context, contextDescriptions);
+
+  // 3. Connect to MCP Server with retry
+  await connectToServerWithRetry(port, timeout, state, context, contextDescriptions, token);
 }
 
 /**
@@ -418,6 +486,56 @@ async function handleExecuteMessage(
 }
 
 /**
+ * Connect to MCP Server with retry logic
+ * Retries connection on failure with exponential backoff
+ */
+async function connectToServerWithRetry(
+  port: number,
+  timeout: number,
+  state: TestState,
+  injectedContext?: ConnectContext,
+  contextDescriptions?: Record<string, string>,
+  token?: string,
+  maxRetries: number = 10,
+  initialDelay: number = 1000
+): Promise<void> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await connectToServer(port, timeout, state, injectedContext, contextDescriptions, token);
+      return; // Success
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if it's a connection error (daemon might not be ready yet)
+      const isConnectionError =
+        lastError.message.includes("ECONNREFUSED") ||
+        lastError.message.includes("Connection refused") ||
+        lastError.message.includes("connection failed") ||
+        lastError.message.includes("WebSocket error event") ||
+        lastError.message.includes("WebSocket connection failed") ||
+        lastError.message.includes("connection closed unexpectedly");
+
+      if (!isConnectionError) {
+        // Not a connection error, don't retry
+        throw lastError;
+      }
+
+      if (attempt < maxRetries - 1) {
+        const delay = initialDelay * Math.pow(1.5, attempt);
+        console.log(
+          `[testing-mcp] Connection failed, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError || new Error("Connection failed after all retries");
+}
+
+/**
  * Connect to MCP Server via WebSocket
  */
 async function connectToServer(
@@ -440,8 +558,11 @@ async function connectToServer(
 
     const ws = new WSImpl(wsUrl);
     let sessionId: string | undefined;
+    let resolved = false; // Track if promise has been resolved/rejected
 
     const timeoutId = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
       ws.close();
       reject(new Error(`Connection timeout after ${timeout}ms`));
     }, timeout);
@@ -508,6 +629,7 @@ async function connectToServer(
           // Clean up session ID
           delete process.env.TESTING_MCP_SESSION_ID;
 
+          resolved = true;
           ws.close();
           resolve();
         } else if (message.type === "error") {
@@ -516,6 +638,7 @@ async function connectToServer(
           // Clean up session ID
           delete process.env.TESTING_MCP_SESSION_ID;
 
+          resolved = true;
           ws.close();
           reject(new Error(message.data?.message || "Unknown error"));
         }
@@ -525,12 +648,35 @@ async function connectToServer(
     };
 
     const onError = (error: any) => {
+      if (resolved) return;
+
       clearTimeout(timeoutId);
 
       // Clean up session ID
       delete process.env.TESTING_MCP_SESSION_ID;
 
-      reject(error);
+      resolved = true;
+
+      // Handle different error types:
+      // - Node.js ws package: passes Error object directly
+      // - Browser WebSocket: passes Event object with limited info
+      let errorMessage: string;
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (error && typeof error === "object") {
+        // Browser WebSocket Event - extract what we can
+        if ("message" in error && typeof error.message === "string") {
+          errorMessage = error.message;
+        } else if ("type" in error) {
+          errorMessage = `WebSocket ${error.type} event - connection failed to ws://localhost:${port}`;
+        } else {
+          errorMessage = `WebSocket connection failed to ws://localhost:${port}`;
+        }
+      } else {
+        errorMessage = `WebSocket connection failed to ws://localhost:${port}`;
+      }
+
+      reject(new Error(errorMessage));
     };
 
     const onClose = () => {
@@ -538,6 +684,13 @@ async function connectToServer(
 
       // Clean up session ID
       delete process.env.TESTING_MCP_SESSION_ID;
+
+      // If not already resolved, reject with connection closed error
+      // This handles unexpected disconnections
+      if (!resolved) {
+        resolved = true;
+        reject(new Error("WebSocket connection closed unexpectedly"));
+      }
     };
 
     // Set up event listeners based on WebSocket type

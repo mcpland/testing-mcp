@@ -21,6 +21,7 @@ export interface ConnectOptions {
   filePath?: string;
   context?: ConnectContext;
   contextDescriptions?: Record<string, string>; // Optional descriptions for context keys
+  daemonWaitTimeout?: number; // Timeout for waiting for daemon to start (default: 60000ms)
 }
 
 export interface TestState {

@@ -110,20 +110,93 @@ export class BridgeClient {
   private async startDaemon(): Promise<void> {
     console.error("[testing-mcp:adapter] Starting daemon...");
 
-    // Use the same Node.js executable and module
-    const execPath = process.execPath;
-    const modulePath = this.options.daemonPath || process.argv[1];
+    // Find the correct module path for testing-mcp
+    // Cannot rely on process.argv[1] as it may point to npx internals
+    const modulePath = await this.resolveDaemonPath();
+
+    if (!modulePath) {
+      throw new Error(
+        "Could not find testing-mcp entry point. " +
+        "Please start the daemon manually with 'npx testing-mcp bridge' or 'testing-mcp bridge'"
+      );
+    }
+
+    console.error(`[testing-mcp:adapter] Daemon path: ${modulePath}`);
 
     // Spawn daemon with 'bridge' subcommand
+    const execPath = process.execPath;
     this.daemonProcess = spawn(execPath, [modulePath, "bridge"], {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"], // Capture stderr for debugging
+    });
+
+    // Log any errors from daemon startup
+    if (this.daemonProcess.stderr) {
+      this.daemonProcess.stderr.on("data", (data: Buffer) => {
+        console.error(`[testing-mcp:daemon] ${data.toString().trim()}`);
+      });
+    }
+
+    // Handle spawn errors
+    this.daemonProcess.on("error", (error) => {
+      console.error(`[testing-mcp:adapter] Failed to start daemon: ${error.message}`);
     });
 
     // Detach from parent process
     this.daemonProcess.unref();
 
     console.error(`[testing-mcp:adapter] Daemon process spawned (pid: ${this.daemonProcess.pid})`);
+  }
+
+  /**
+   * Resolve the path to the testing-mcp entry point
+   */
+  private async resolveDaemonPath(): Promise<string | null> {
+    // 1. Explicit path in options
+    if (this.options.daemonPath) {
+      return this.options.daemonPath;
+    }
+
+    // 2. Try to resolve from current module location
+    // import.meta.url gives us the current file's URL
+    try {
+      const { fileURLToPath } = await import("url");
+      const { dirname, resolve } = await import("path");
+
+      const currentDir = dirname(fileURLToPath(import.meta.url));
+      // We're in src/adapter or dist/adapter, go up to find index.js
+      const possiblePaths = [
+        resolve(currentDir, "..", "index.js"),           // dist/index.js from dist/adapter
+        resolve(currentDir, "..", "..", "dist", "index.js"), // dist/index.js from src/adapter
+      ];
+
+      const { existsSync } = await import("fs");
+      for (const p of possiblePaths) {
+        if (existsSync(p)) {
+          return p;
+        }
+      }
+    } catch (error) {
+      console.error("[testing-mcp:adapter] Error resolving daemon path:", error);
+    }
+
+    // 3. Try to find testing-mcp in node_modules
+    try {
+      const { createRequire } = await import("module");
+      const require = createRequire(import.meta.url);
+      const pkgPath = require.resolve("testing-mcp/package.json");
+      const { dirname, resolve } = await import("path");
+      return resolve(dirname(pkgPath), "dist", "index.js");
+    } catch {
+      // Not installed as a package
+    }
+
+    // 4. Try process.argv[1] as last resort (may work in some environments)
+    if (process.argv[1] && !process.argv[1].includes("npx")) {
+      return process.argv[1];
+    }
+
+    return null;
   }
 
   /**
