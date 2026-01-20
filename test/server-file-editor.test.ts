@@ -10,7 +10,7 @@ import { connect } from "testing-mcp/client";
 
 test("demo", async () => {
   // >>>> TESTING-MCP:BEGIN step-1
-  await connect({ port: 3001 });
+  await connect({});
   const intermediate = 1;
   // >>>> TESTING-MCP:END
 

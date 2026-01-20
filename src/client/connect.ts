@@ -131,37 +131,22 @@ async function waitForDaemon(timeout: number = 60000): Promise<{ wsPort: number;
 }
 
 /**
- * Resolve the WebSocket port to connect to
- * Priority: options.port > env.TESTING_MCP_PORT > registry (with waiting) > error
+ * Resolve the WebSocket connection info
+ * Uses auto-discovery from daemon registry file.
  *
- * @param options Connect options
  * @param waitTimeout Timeout for waiting for daemon (default: 60 seconds)
  */
 async function resolveConnectionInfo(
-  options: ConnectOptions,
   waitTimeout: number = 60000
 ): Promise<{ port: number; token?: string }> {
-  // 1. Explicit port in options
-  if (options.port) {
-    return { port: options.port };
-  }
-
-  // 2. Environment variable
-  if (process.env.TESTING_MCP_PORT) {
-    const port = parseInt(process.env.TESTING_MCP_PORT, 10);
-    if (!isNaN(port)) {
-      return { port };
-    }
-  }
-
-  // 3. Registry file (auto-discovery from daemon)
+  // 1. Auto-discovery from registry file (primary method)
   const registry = await tryReadRegistry();
   if (registry && registry.pid && isProcessRunning(registry.pid)) {
     console.log(`[testing-mcp] Auto-discovered daemon on port ${registry.wsPort}`);
     return { port: registry.wsPort, token: registry.token };
   }
 
-  // 4. Wait for daemon to be ready
+  // 2. Wait for daemon to be ready
   console.log("[testing-mcp] No daemon found, waiting for daemon to start...");
   console.log("[testing-mcp] Please start the MCP adapter (e.g., via Claude Desktop or Cursor)");
 
@@ -170,7 +155,7 @@ async function resolveConnectionInfo(
     return { port: daemonInfo.wsPort, token: daemonInfo.token };
   }
 
-  // 5. Timeout - throw error instead of silently failing
+  // 3. Timeout - throw error
   throw new Error(
     `[testing-mcp] Timeout waiting for daemon. Please ensure the MCP adapter is running.\n` +
     `Hint: Start the adapter via Claude Desktop, Cursor, or run 'npx testing-mcp bridge' manually.`
@@ -186,7 +171,9 @@ async function resolveConnectionInfo(
  *
  * test('login flow', async () => {
  *   render(<LoginForm />);
- *   await connect({ port: 3001 });
+ *   await connect({
+ *     context: { screen, fireEvent },
+ *   });
  * });
  * ```
  */
@@ -209,7 +196,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
 
   // Resolve connection info (with auto-discovery and waiting for daemon)
   // This will block until daemon is ready or timeout
-  const connectionInfo = await resolveConnectionInfo(options, daemonWaitTimeout);
+  const connectionInfo = await resolveConnectionInfo(daemonWaitTimeout);
   const { port, token } = connectionInfo;
 
   // 1. Wait for all async operations to complete

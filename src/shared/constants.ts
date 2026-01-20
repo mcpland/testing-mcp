@@ -32,12 +32,6 @@ export function getLockPath(): string {
 }
 
 /**
- * Default ports
- */
-export const DEFAULT_WS_PORT = 3001;
-export const DEFAULT_RPC_PORT = 3002;
-
-/**
  * Protocol version for compatibility checking
  */
 export const PROTOCOL_VERSION = 1;
