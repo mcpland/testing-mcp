@@ -60,11 +60,15 @@ it("your test", async () => {
 Prompt:
 
 ```
-Please run the persistent test: `TESTING_MCP=true RTL_SKIP_AUTO_CLEANUP=true npm test test/example.test.tsx`,
+Please run the persistent test in the `examples/react-jest` directory:
 
-Then use testing-mcp to write the test in `test/example.test.tsx` with these steps:
-1. Click the "count" button.
-2. Verify that the number on the count button becomes "1".
+`TESTING_MCP=true RTL_SKIP_AUTO_CLEANUP=true npm test test/App.test.tsx`
+
+Then, use the `testing-mcp` tool to write the test by following these steps:
+
+1. Click the button displaying "count is 0".
+2. Verify that the button text changes to "count is 1".
+3. Write the test code to a file.
 ```
 
 Now your AI assistant can see the page structure, execute code in the test, and help you write assertions.
