@@ -231,13 +231,13 @@ Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the 
 
 Once connected, your AI assistant can use these tools:
 
-| Tool                     | Purpose                                                    | When to Use                                     |
-| ------------------------ | ---------------------------------------------------------- | ----------------------------------------------- |
-| `get_current_test_state` | Fetch current page structure, console logs, and APIs       | Inspect what's rendered and what APIs are available |
-| `execute_test_step`      | Run JavaScript/TypeScript code in the test environment     | Trigger interactions, check state, run assertions |
-| `finalize_test`          | Remove `connect()` call and clean up test file             | After test is complete and working              |
-| `list_active_tests`      | Show all connected tests with timestamps                   | See which tests are available                   |
-| `get_generated_code`     | Extract code blocks inserted by the helper                 | Audit what code was added                       |
+| Tool                     | Purpose                                                | When to Use                                         |
+| ------------------------ | ------------------------------------------------------ | --------------------------------------------------- |
+| `get_current_test_state` | Fetch current page structure, console logs, and APIs   | Inspect what's rendered and what APIs are available |
+| `execute_test_step`      | Run JavaScript/TypeScript code in the test environment | Trigger interactions, check state, run assertions   |
+| `finalize_test`          | Remove `connect()` call and clean up test file         | After test is complete and working                  |
+| `list_active_tests`      | Show all connected tests with timestamps               | See which tests are available                       |
+| `get_generated_code`     | Extract code blocks inserted by the helper             | Audit what code was added                           |
 
 ### `get_current_test_state`
 
@@ -285,10 +285,10 @@ The `connect()` function accepts a `context` object that exposes APIs to the tes
 ```ts
 await connect({
   context: {
-    screen,      // React Testing Library queries
-    fireEvent,   // DOM event triggering
-    userEvent,   // User interaction simulation
-    waitFor,     // Async waiting utility
+    screen, // React Testing Library queries
+    fireEvent, // DOM event triggering
+    userEvent, // User interaction simulation
+    waitFor, // Async waiting utility
   },
 });
 ```
@@ -354,11 +354,11 @@ Testing MCP v0.4.0 introduces a **Daemon + Adapter architecture** that allows mu
 
 ### Components
 
-| Component | Description |
-|-----------|-------------|
+| Component         | Description                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
 | **Bridge Daemon** | Single background process that manages WebSocket connections from tests. Automatically assigns ports. |
-| **MCP Adapter** | Lightweight stdio MCP server that each client spawns. Communicates with daemon via RPC. |
-| **Registry File** | `~/.testing-mcp/bridge.json` - Contains daemon port and auth token for auto-discovery. |
+| **MCP Adapter**   | Lightweight stdio MCP server that each client spawns. Communicates with daemon via RPC.               |
+| **Registry File** | `~/.testing-mcp/bridge.json` - Contains daemon port and auth token for auto-discovery.                |
 
 ### Auto-Discovery
 
@@ -568,10 +568,10 @@ afterEach(async () => {
 
 The registry file stores daemon connection info for auto-discovery:
 
-| Platform | Path |
-|----------|------|
-| macOS/Linux | `~/.testing-mcp/bridge.json` |
-| Windows | `%LOCALAPPDATA%\testing-mcp\bridge.json` |
+| Platform    | Path                                     |
+| ----------- | ---------------------------------------- |
+| macOS/Linux | `~/.testing-mcp/bridge.json`             |
+| Windows     | `%LOCALAPPDATA%\testing-mcp\bridge.json` |
 
 **Example registry content:**
 
@@ -640,20 +640,20 @@ Testing MCP uses a **Daemon + Adapter architecture** for robust multi-client sup
 
 ### Key Components
 
-| Component | Responsibility |
-|-----------|----------------|
+| Component         | Responsibility                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------- |
 | **Bridge Daemon** | Singleton process managing WebSocket connections, session state, and code execution |
-| **MCP Adapter** | Per-client stdio MCP server that forwards tool calls to daemon via RPC |
-| **Registry File** | Stores daemon port/token for auto-discovery by adapters and test clients |
-| **Test Client** | `connect()` function that establishes WebSocket to daemon |
+| **MCP Adapter**   | Per-client stdio MCP server that forwards tool calls to daemon via RPC              |
+| **Registry File** | Stores daemon port/token for auto-discovery by adapters and test clients            |
+| **Test Client**   | `connect()` function that establishes WebSocket to daemon                           |
 
 ### Protocol Summary
 
-| Communication | Protocol | Purpose |
-|---------------|----------|---------|
-| Test ↔ Daemon | WebSocket | State sync, code execution |
-| Adapter ↔ Daemon | WebSocket RPC | Tool call forwarding |
-| Client ↔ Adapter | Stdio JSON-RPC | MCP protocol |
+| Communication    | Protocol       | Purpose                    |
+| ---------------- | -------------- | -------------------------- |
+| Test ↔ Daemon    | WebSocket      | State sync, code execution |
+| Adapter ↔ Daemon | WebSocket RPC  | Tool call forwarding       |
+| Client ↔ Adapter | Stdio JSON-RPC | MCP protocol               |
 
 ### Benefits of This Architecture
 
