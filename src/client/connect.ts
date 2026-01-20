@@ -180,8 +180,8 @@ async function resolveConnectionInfo(
 export async function connect(options: ConnectOptions = {}): Promise<void> {
   process.env.TESTING_MCP_FILE =
     process.env.TESTING_MCP_FILE ?? options.filePath;
-  // Check environment - skip in CI or if not explicitly enabled
-  if (!process.env.TESTING_MCP || process.env.CI) {
+  // Check environment
+  if (!process.env.TESTING_MCP) {
     console.log("[testing-mcp] Skipping in CI/non-dev environment");
     return;
   }
