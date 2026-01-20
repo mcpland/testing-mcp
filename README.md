@@ -60,7 +60,7 @@ it("your test", async () => {
 Prompt:
 
 ```
-Please run the persistent test: `TESTING_MCP=true RTL_SKIP_AUTO_CLEANUP=true CI=true npm test test/example.test.tsx`,
+Please run the persistent test: `TESTING_MCP=true RTL_SKIP_AUTO_CLEANUP=true npm test test/example.test.tsx`,
 
 Then use testing-mcp to write the test in `test/example.test.tsx` with these steps:
 1. Click the "count" button.
@@ -219,7 +219,7 @@ it(
 );
 ```
 
-Set `TESTING_MCP=true CI=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
+Set `TESTING_MCP=true` locally to enable the bridge. The helper no-ops when the variable is missing or the tests run in continuous integration.
 
 > If the DOM has been automatically cleared after the `afterEach` hook executes, please set `RTL_SKIP_AUTO_CLEANUP=true`.
 

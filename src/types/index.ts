@@ -15,13 +15,18 @@ export interface ContextMetadata {
 }
 
 export interface ConnectOptions {
-  port?: number;
+  /** Timeout for the entire connection session (default: 300000ms = 5 minutes) */
   timeout?: number;
+  /** Wait for async operations before collecting state (default: true) */
   waitForAsync?: boolean;
+  /** Test file path (auto-detected if not provided) */
   filePath?: string;
+  /** Context objects to inject into code execution */
   context?: ConnectContext;
-  contextDescriptions?: Record<string, string>; // Optional descriptions for context keys
-  daemonWaitTimeout?: number; // Timeout for waiting for daemon to start (default: 60000ms)
+  /** Human-readable descriptions for context keys */
+  contextDescriptions?: Record<string, string>;
+  /** Timeout for waiting for daemon to start (default: 60000ms) */
+  daemonWaitTimeout?: number;
 }
 
 export interface TestState {

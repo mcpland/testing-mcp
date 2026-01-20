@@ -1,7 +1,21 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
 
 const originalEnv = { ...process.env };
 const originalRequire = (global as any).require;
+
+// Mock registry data
+const mockRegistry = {
+  pid: process.pid, // Use current process PID so isProcessRunning returns true
+  wsPort: 4321,
+  rpcPort: 4322,
+  token: "test-token",
+  startedAt: new Date().toISOString(),
+  version: "0.4.0",
+  protocol: 1,
+};
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -52,7 +66,10 @@ class MockWebSocket {
 }
 
 describe("client/connect", () => {
-  beforeEach(() => {
+  let registryDir: string;
+  let registryPath: string;
+
+  beforeEach(async () => {
     vi.resetModules();
     MockWebSocket.reset();
     process.env = { ...originalEnv };
@@ -61,21 +78,35 @@ describe("client/connect", () => {
       ...console,
       error: vi.fn(),
       log: vi.fn(),
+      warn: vi.fn(),
     });
+
+    // Setup mock registry file
+    registryDir = path.join(os.homedir(), ".testing-mcp");
+    registryPath = path.join(registryDir, "bridge.json");
+    await fs.mkdir(registryDir, { recursive: true });
+    await fs.writeFile(registryPath, JSON.stringify(mockRegistry));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.env = { ...originalEnv };
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.doUnmock("ws");
     (global as any).require = originalRequire;
+
+    // Cleanup mock registry
+    try {
+      await fs.unlink(registryPath);
+    } catch {
+      // Ignore if file doesn't exist
+    }
   });
 
   it("skips connection when TESTING_MCP is not enabled", async () => {
     const { connect } = await import("../src/client/connect.ts");
 
-    await expect(connect({ port: 1234 })).resolves.toBeUndefined();
+    await expect(connect({})).resolves.toBeUndefined();
     expect(console.log).toHaveBeenCalledWith(
       "[testing-mcp] Skipping in CI/non-dev environment"
     );
@@ -102,7 +133,6 @@ describe("client/connect", () => {
     const { connect } = await import("../src/client/connect.ts");
 
     const connectPromise = connect({
-      port: 4321,
       filePath: "/tests/demo.test.tsx",
       context: {
         document: mockDocument,
@@ -191,7 +221,6 @@ describe("client/connect", () => {
     const { connect } = await import("../src/client/connect.ts");
 
     const connectPromise = connect({
-      port: 5555,
       waitForAsync: false,
       filePath: "/tests/error.test.tsx",
       context: { console, document: mockDocument, window: {} },
@@ -253,7 +282,6 @@ describe("client/connect", () => {
     const { connect } = await import("../src/client/connect.ts");
 
     const promise = connect({
-      port: 6000,
       waitForAsync: false,
       filePath: "/tests/ws.test.tsx",
       context: { console, document: mockDocument, window: {} },

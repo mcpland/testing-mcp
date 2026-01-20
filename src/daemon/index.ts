@@ -14,7 +14,7 @@ import {
   isDaemonRunning,
   type LockHandle,
 } from "./registry.js";
-import { DEFAULT_WS_PORT, DEFAULT_RPC_PORT, VERSION } from "../shared/constants.js";
+import { VERSION } from "../shared/constants.js";
 
 export interface DaemonOptions {
   wsPort?: number;
