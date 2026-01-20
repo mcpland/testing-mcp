@@ -11,6 +11,13 @@ import type {
   ContextMetadata,
 } from "../types/index.js";
 
+// Static imports for Node.js built-in modules
+// These must be static imports to work in Jest's VM sandbox environment
+// Dynamic imports (await import()) fail in CommonJS modules running in Jest
+import * as path from "path";
+import * as os from "os";
+import * as fsPromises from "fs/promises";
+
 // Lazy-loaded WebSocket implementation
 let WebSocketImpl: any = null;
 
@@ -42,10 +49,7 @@ async function getWebSocketImpl(): Promise<any> {
 /**
  * Get the registry file path
  */
-async function getRegistryPath(): Promise<string> {
-  const path = await import("path");
-  const os = await import("os");
-
+function getRegistryPath(): string {
   // Determine registry path based on platform
   let dataDir: string;
   if (process.platform === "win32") {
@@ -77,9 +81,8 @@ function isProcessRunning(pid: number): boolean {
  */
 async function tryReadRegistry(): Promise<{ wsPort: number; token?: string; pid?: number } | null> {
   try {
-    const fs = await import("fs/promises");
-    const registryPath = await getRegistryPath();
-    const content = await fs.readFile(registryPath, "utf-8");
+    const registryPath = getRegistryPath();
+    const content = await fsPromises.readFile(registryPath, "utf-8");
     const registry = JSON.parse(content);
 
     if (typeof registry.wsPort === "number") {
