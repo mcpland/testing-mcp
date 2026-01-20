@@ -65,4 +65,4 @@ export const RPC_METHODS = {
 /**
  * Version info
  */
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.1";
