@@ -23,7 +23,7 @@ class MockWebSocket {
   public url: string;
   public sentMessages: string[] = [];
 
-  private listeners = new Map<string, Array<(data?: any) => void>>();
+  private listeners = new Map<string, Array<(...args: any[]) => void>>();
 
   constructor(url: string) {
     this.url = url;
@@ -34,13 +34,13 @@ class MockWebSocket {
     this.instances.length = 0;
   }
 
-  on(event: string, handler: (data?: any) => void) {
+  on(event: string, handler: (...args: any[]) => void) {
     const list = this.listeners.get(event) ?? [];
     list.push(handler);
     this.listeners.set(event, list);
   }
 
-  addEventListener(event: string, handler: (data?: any) => void) {
+  addEventListener(event: string, handler: (...args: any[]) => void) {
     this.on(event, handler);
   }
 
@@ -48,14 +48,14 @@ class MockWebSocket {
     this.sentMessages.push(payload);
   }
 
-  close() {
-    this.emit("close");
+  close(code?: number, reason?: unknown) {
+    this.emit("close", code, reason);
   }
 
-  emit(event: string, data?: any) {
+  emit(event: string, ...args: any[]) {
     const list = this.listeners.get(event) ?? [];
     for (const handler of list) {
-      handler(data);
+      handler(...args);
     }
   }
 
@@ -81,8 +81,9 @@ describe("client/connect", () => {
       warn: vi.fn(),
     });
 
-    // Setup mock registry file
-    registryDir = path.join(os.homedir(), ".testing-mcp");
+    // Setup mock registry file in an isolated data directory
+    registryDir = await fs.mkdtemp(path.join(os.tmpdir(), "testing-mcp-client-"));
+    process.env.TESTING_MCP_DATA_DIR = registryDir;
     registryPath = path.join(registryDir, "bridge.json");
     await fs.mkdir(registryDir, { recursive: true });
     await fs.writeFile(registryPath, JSON.stringify(mockRegistry));
@@ -95,11 +96,10 @@ describe("client/connect", () => {
     vi.doUnmock("ws");
     (global as any).require = originalRequire;
 
-    // Cleanup mock registry
     try {
-      await fs.unlink(registryPath);
+      await fs.rm(registryDir, { force: true, recursive: true });
     } catch {
-      // Ignore if file doesn't exist
+      // Ignore if cleanup races with a test failure
     }
   });
 
@@ -198,6 +198,232 @@ describe("client/connect", () => {
 
     await expect(connectPromise).resolves.toBeUndefined();
     expect(process.env.TESTING_MCP_SESSION_ID).toBeUndefined();
+  });
+
+  it("uses an explicit port and token before registry auto-discovery", async () => {
+    process.env.TESTING_MCP = "1";
+    delete process.env.CI;
+
+    const mockDocument = {
+      body: {
+        innerHTML: "<main></main>",
+        outerHTML: "<html><body><main></main></body></html>",
+      },
+    };
+
+    vi.stubGlobal("document", mockDocument);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    const { connect } = await import("../src/client/connect.ts");
+
+    const connectPromise = connect({
+      filePath: "/tests/explicit-port.test.tsx",
+      port: 9876,
+      token: "explicit-token",
+      waitForAsync: false,
+      context: { console, document: mockDocument, window: {} },
+    });
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws.url).toBe("ws://localhost:9876?token=explicit-token");
+    ws.emit("open");
+    ws.emitMessage({ type: "close" });
+    ws.close();
+
+    await connectPromise;
+  });
+
+  it("uses TESTING_MCP_PORT before registry auto-discovery", async () => {
+    process.env.TESTING_MCP = "1";
+    process.env.TESTING_MCP_PORT = "7654";
+    process.env.TESTING_MCP_TOKEN = "env-token";
+    delete process.env.CI;
+
+    const mockDocument = {
+      body: {
+        innerHTML: "<main></main>",
+        outerHTML: "<html><body><main></main></body></html>",
+      },
+    };
+
+    vi.stubGlobal("document", mockDocument);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    const { connect } = await import("../src/client/connect.ts");
+
+    const connectPromise = connect({
+      filePath: "/tests/env-port.test.tsx",
+      waitForAsync: false,
+      context: { console, document: mockDocument, window: {} },
+    });
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws.url).toBe("ws://localhost:7654?token=env-token");
+    ws.emit("open");
+    ws.emitMessage({ type: "close" });
+    ws.close();
+
+    await connectPromise;
+  });
+
+  it("re-resolves the registry after a connection failure", async () => {
+    process.env.TESTING_MCP = "1";
+    delete process.env.CI;
+
+    const mockDocument = {
+      body: {
+        innerHTML: "<main></main>",
+        outerHTML: "<html><body><main></main></body></html>",
+      },
+    };
+
+    vi.stubGlobal("document", mockDocument);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    const { connect } = await import("../src/client/connect.ts");
+
+    const connectPromise = connect({
+      filePath: "/tests/reresolve.test.tsx",
+      waitForAsync: false,
+      context: { console, document: mockDocument, window: {} },
+    });
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    const first = MockWebSocket.instances[0];
+    expect(first.url).toBe("ws://localhost:4321?token=test-token");
+
+    await fs.writeFile(
+      registryPath,
+      JSON.stringify({
+        ...mockRegistry,
+        wsPort: 9876,
+      })
+    );
+    first.emit("error", { type: "error" });
+
+    await vi.waitFor(
+      () => {
+        expect(MockWebSocket.instances.length).toBe(2);
+      },
+      { timeout: 3000 }
+    );
+
+    const second = MockWebSocket.instances[1];
+    expect(second.url).toBe("ws://localhost:9876?token=test-token");
+    second.emit("open");
+    second.emitMessage({ type: "close" });
+    second.close();
+
+    await connectPromise;
+  });
+
+  it("waits for daemon registry only once before retrying fallback port", async () => {
+    process.env.TESTING_MCP = "1";
+    delete process.env.CI;
+    delete process.env.TESTING_MCP_PORT;
+    delete process.env.TESTING_MCP_TOKEN;
+    await fs.rm(registryPath, { force: true });
+
+    const mockDocument = {
+      body: {
+        innerHTML: "<main></main>",
+        outerHTML: "<html><body><main></main></body></html>",
+      },
+    };
+
+    vi.stubGlobal("document", mockDocument);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    const { connect } = await import("../src/client/connect.ts");
+
+    const connectPromise = connect({
+      filePath: "/tests/fallback-retry.test.tsx",
+      waitForAsync: false,
+      daemonWaitTimeout: 5,
+      context: { console, document: mockDocument, window: {} },
+    });
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    const first = MockWebSocket.instances[0];
+    expect(first.url).toBe("ws://localhost:3001");
+    first.emit("error", { type: "error" });
+    first.close();
+
+    await vi.waitFor(
+      () => {
+        expect(MockWebSocket.instances.length).toBe(2);
+      },
+      { timeout: 3000 }
+    );
+
+    const second = MockWebSocket.instances[1];
+    expect(second.url).toBe("ws://localhost:3001");
+    second.emit("open");
+    second.emitMessage({ type: "close" });
+    second.close();
+
+    await connectPromise;
+
+    const waitLogs = vi.mocked(console.log).mock.calls.filter(([message]) =>
+      String(message).includes("Waiting for daemon to be ready")
+    );
+    expect(waitLogs).toHaveLength(1);
+  });
+
+  it("does not retry invalid daemon token closes", async () => {
+    process.env.TESTING_MCP = "1";
+    delete process.env.CI;
+
+    const mockDocument = {
+      body: {
+        innerHTML: "<main></main>",
+        outerHTML: "<html><body><main></main></body></html>",
+      },
+    };
+
+    vi.stubGlobal("document", mockDocument);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    const { connect } = await import("../src/client/connect.ts");
+
+    const connectPromise = connect({
+      filePath: "/tests/invalid-token.test.tsx",
+      port: 9876,
+      token: "wrong-token",
+      waitForAsync: false,
+      context: { console, document: mockDocument, window: {} },
+    });
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws.url).toBe("ws://localhost:9876?token=wrong-token");
+    ws.emit("open");
+    ws.close(1008, Buffer.from("Invalid token"));
+
+    await expect(connectPromise).rejects.toThrow("Invalid daemon token");
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it("reports execution errors and keeps DOM snapshot available", async () => {

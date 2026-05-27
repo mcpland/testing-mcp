@@ -7,6 +7,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { randomBytes } from "crypto";
+import WebSocket from "ws";
 import {
   getDataDir,
   getRegistryPath,
@@ -14,8 +15,11 @@ import {
   LOCK_STALE_TIMEOUT,
   PROTOCOL_VERSION,
   VERSION,
+  RPC_METHODS,
 } from "../shared/constants.js";
-import type { RegistryInfo } from "../shared/types.js";
+import type { RegistryInfo, RPCRequest, RPCResponse } from "../shared/types.js";
+
+const DEFAULT_RPC_HEALTH_TIMEOUT_MS = 1000;
 
 /**
  * Ensure the data directory exists
@@ -129,6 +133,175 @@ export function isProcessRunning(pid: number): boolean {
   }
 }
 
+export interface DaemonHealth {
+  healthy: boolean;
+  pidAlive?: boolean;
+  protocolCompatible?: boolean;
+  reason?: string;
+  registry: RegistryInfo | null;
+  registryPath: string;
+  rpcReachable?: boolean;
+}
+
+/**
+ * Verify that the registry points to a daemon that can answer authenticated RPC.
+ */
+export async function pingDaemonRpc(
+  registry: RegistryInfo,
+  timeoutMs: number = DEFAULT_RPC_HEALTH_TIMEOUT_MS
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${registry.rpcPort}`);
+    let resolved = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (result: { ok: boolean; error?: string }) => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      try {
+        ws.close();
+      } catch {
+        // Ignore close errors during health checks.
+      }
+      resolve(result);
+    };
+
+    timeout = setTimeout(() => {
+      finish({ ok: false, error: `RPC health check timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+
+    ws.on("open", () => {
+      const request: RPCRequest = {
+        id: "health-check",
+        method: RPC_METHODS.PING,
+        token: registry.token,
+      };
+      ws.send(JSON.stringify(request));
+    });
+
+    ws.on("message", (data: Buffer) => {
+      try {
+        const response = JSON.parse(data.toString()) as RPCResponse;
+        if (response.id !== "health-check") {
+          finish({ ok: false, error: "Unexpected RPC health check response id" });
+          return;
+        }
+
+        if (!response.success) {
+          finish({ ok: false, error: response.error || "RPC health check failed" });
+          return;
+        }
+
+        finish({ ok: true });
+      } catch (error) {
+        finish({
+          ok: false,
+          error: error instanceof Error ? error.message : "Invalid RPC health check response",
+        });
+      }
+    });
+
+    ws.on("error", (error) => {
+      finish({ ok: false, error: error.message });
+    });
+
+    ws.on("close", () => {
+      finish({ ok: false, error: "RPC connection closed before health check completed" });
+    });
+  });
+}
+
+/**
+ * Inspect the daemon registry and optionally clean up stale entries.
+ */
+export async function checkDaemonHealth(options: {
+  cleanup?: boolean;
+  rpcTimeoutMs?: number;
+} = {}): Promise<DaemonHealth> {
+  const registryPath = getRegistryPath();
+  const registry = await readRegistry();
+  const cleanup = options.cleanup === true;
+
+  if (!registry) {
+    return {
+      healthy: false,
+      reason: "registry_missing",
+      registry,
+      registryPath,
+    };
+  }
+
+  const protocolCompatible = registry.protocol === PROTOCOL_VERSION;
+  if (!protocolCompatible) {
+    if (cleanup) {
+      console.error(
+        `[testing-mcp] Daemon protocol v${registry.protocol} is incompatible with expected v${PROTOCOL_VERSION}, cleaning up registry`
+      );
+      await deleteRegistry();
+    }
+
+    return {
+      healthy: false,
+      protocolCompatible,
+      reason: "protocol_mismatch",
+      registry,
+      registryPath,
+    };
+  }
+
+  const pidAlive = isProcessRunning(registry.pid);
+  if (!pidAlive) {
+    if (cleanup) {
+      console.error(`[testing-mcp] Daemon process ${registry.pid} is not running, cleaning up registry`);
+      await deleteRegistry();
+    }
+
+    return {
+      healthy: false,
+      pidAlive,
+      protocolCompatible,
+      reason: "process_not_running",
+      registry,
+      registryPath,
+    };
+  }
+
+  const rpcHealth = await pingDaemonRpc(registry, options.rpcTimeoutMs);
+  if (!rpcHealth.ok) {
+    if (cleanup) {
+      console.error(
+        `[testing-mcp] Daemon RPC health check failed (${rpcHealth.error || "unknown error"}), cleaning up registry`
+      );
+      await deleteRegistry();
+    }
+
+    return {
+      healthy: false,
+      pidAlive,
+      protocolCompatible,
+      reason: rpcHealth.error || "rpc_unreachable",
+      registry,
+      registryPath,
+      rpcReachable: false,
+    };
+  }
+
+  return {
+    healthy: true,
+    pidAlive,
+    protocolCompatible,
+    registry,
+    registryPath,
+    rpcReachable: true,
+  };
+}
+
 /**
  * Lock file handle for release
  */
@@ -219,20 +392,11 @@ async function tryReadLockFile(
  * Check if daemon is running by reading registry and verifying process
  */
 export async function isDaemonRunning(): Promise<RegistryInfo | null> {
-  const registry = await readRegistry();
+  const health = await checkDaemonHealth({
+    cleanup: true,
+  });
 
-  if (!registry) {
-    return null;
-  }
-
-  // Verify the process is still running
-  if (!isProcessRunning(registry.pid)) {
-    console.error(`[testing-mcp] Daemon process ${registry.pid} is not running, cleaning up registry`);
-    await deleteRegistry();
-    return null;
-  }
-
-  return registry;
+  return health.healthy ? health.registry : null;
 }
 
 /**

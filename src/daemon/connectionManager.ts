@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
+import type { IncomingMessage } from "http";
 import type { TestState } from "../types/index.js";
 
 export interface ConnectionInfo {
@@ -33,7 +34,7 @@ export class ConnectionManager {
   private ready: Promise<void>;
   private resolveReady!: () => void;
 
-  constructor(port: number = 0) {
+  constructor(port: number = 0, private readonly token?: string) {
     // Create a promise that resolves when server is listening
     this.ready = new Promise((resolve) => {
       this.resolveReady = resolve;
@@ -74,7 +75,13 @@ export class ConnectionManager {
   /**
    * Handle new WebSocket connection
    */
-  private handleConnection = (ws: WebSocket) => {
+  private handleConnection = (ws: WebSocket, request?: IncomingMessage) => {
+    if (!this.isAuthorized(request)) {
+      console.error("[testing-mcp:ws] Rejected unauthorized test connection");
+      ws.close(1008, "Invalid token");
+      return;
+    }
+
     console.error("[testing-mcp:ws] New test connection received");
 
     ws.on("message", (data: Buffer) => {
@@ -106,6 +113,19 @@ export class ConnectionManager {
       this.removeConnectionByWebSocket(ws);
     });
   };
+
+  private isAuthorized(request?: IncomingMessage): boolean {
+    if (!this.token) {
+      return true;
+    }
+
+    try {
+      const url = new URL(request?.url ?? "/", "http://127.0.0.1");
+      return url.searchParams.get("token") === this.token;
+    } catch {
+      return false;
+    }
+  }
 
   /**
    * Handle 'ready' message from test process

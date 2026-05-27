@@ -35,8 +35,11 @@ class FakeWebSocketServer extends EventEmitter {
     this.instances.length = 0;
   }
 
-  simulateConnection(ws: FakeWebSocket = new FakeWebSocket()): FakeWebSocket {
-    this.emit("connection", ws);
+  simulateConnection(
+    ws: FakeWebSocket = new FakeWebSocket(),
+    request: { url?: string } = {}
+  ): FakeWebSocket {
+    this.emit("connection", ws, request);
     return ws;
   }
 
@@ -75,6 +78,15 @@ describe("ConnectionManager", () => {
     return { manager, server };
   }
 
+  async function createManagerWithToken(token: string) {
+    const { ConnectionManager } = await import(
+      "../src/daemon/connectionManager.ts"
+    );
+    const manager = new ConnectionManager(9000, token);
+    const server = FakeWebSocketServer.instances.at(-1)!;
+    return { manager, server };
+  }
+
   function baseState() {
     return {
       testFile: "/tests/sample.test.tsx",
@@ -109,6 +121,28 @@ describe("ConnectionManager", () => {
 
     expect(updates).toHaveLength(1);
     unsubscribe();
+  });
+
+  it("rejects test connections with an invalid token", async () => {
+    const { manager, server } = await createManagerWithToken("secret-token");
+    const ws = server.simulateConnection(new FakeWebSocket(), {
+      url: "/?token=wrong-token",
+    });
+
+    expect(ws.closed).toBe(true);
+    expect(manager.getActiveConnections()).toHaveLength(0);
+  });
+
+  it("accepts test connections with a valid token", async () => {
+    const { manager, server } = await createManagerWithToken("secret-token");
+    const ws = server.simulateConnection(new FakeWebSocket(), {
+      url: "/?token=secret-token",
+    });
+
+    ws.triggerMessage({ type: "ready", data: baseState() });
+
+    expect(ws.closed).toBe(false);
+    expect(manager.getActiveConnections()).toHaveLength(1);
   });
 
   it("waits for ready state and resolves with connection state", async () => {

@@ -15,6 +15,10 @@ export interface ContextMetadata {
 }
 
 export interface ConnectOptions {
+  /** Explicit daemon WebSocket port for the test client */
+  port?: number;
+  /** Explicit daemon token for the test client when using an explicit port */
+  token?: string;
   /** Timeout for the entire connection session (default: 300000ms = 5 minutes) */
   timeout?: number;
   /** Wait for async operations before collecting state (default: true) */

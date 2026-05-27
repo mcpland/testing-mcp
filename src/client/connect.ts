@@ -21,6 +21,16 @@ import * as fsPromises from "fs/promises";
 // Lazy-loaded WebSocket implementation
 let WebSocketImpl: any = null;
 
+type ConnectionSource = "options" | "env" | "registry" | "wait" | "default";
+
+interface ResolvedConnectionInfo {
+  port: number;
+  registryPid?: number;
+  source: ConnectionSource;
+  token?: string;
+  waitedForDaemon?: boolean;
+}
+
 /**
  * Get the appropriate WebSocket implementation for the current environment
  */
@@ -50,6 +60,11 @@ async function getWebSocketImpl(): Promise<any> {
  * Get the registry file path
  */
 function getRegistryPath(): string {
+  const explicitDataDir = process.env.TESTING_MCP_DATA_DIR?.trim();
+  if (explicitDataDir) {
+    return path.join(path.resolve(explicitDataDir), "bridge.json");
+  }
+
   // Determine registry path based on platform
   let dataDir: string;
   if (process.platform === "win32") {
@@ -100,11 +115,108 @@ async function tryReadRegistry(): Promise<{ wsPort: number; token?: string; pid?
   }
 }
 
+async function deleteRegistryIfMatches(connectionInfo: ResolvedConnectionInfo): Promise<void> {
+  if (
+    connectionInfo.source !== "registry" &&
+    connectionInfo.source !== "wait"
+  ) {
+    return;
+  }
+
+  const registry = await tryReadRegistry();
+  if (
+    !registry ||
+    registry.wsPort !== connectionInfo.port ||
+    registry.pid !== connectionInfo.registryPid
+  ) {
+    return;
+  }
+
+  try {
+    await fsPromises.unlink(getRegistryPath());
+    console.log(
+      `[testing-mcp] Removed stale daemon registry for pid ${connectionInfo.registryPid}, port ${connectionInfo.port}`
+    );
+  } catch {
+    // Ignore cleanup races.
+  }
+}
+
+function parsePort(value: number | string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const port = typeof value === "number" ? value : Number.parseInt(value, 10);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    return undefined;
+  }
+
+  return port;
+}
+
+function closeReasonToString(reason: unknown): string {
+  if (reason === undefined || reason === null) {
+    return "";
+  }
+
+  if (typeof reason === "string") {
+    return reason;
+  }
+
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(reason)) {
+    return reason.toString("utf-8");
+  }
+
+  if (reason instanceof Uint8Array) {
+    return new TextDecoder().decode(reason);
+  }
+
+  return String(reason);
+}
+
+function getCloseDetails(
+  eventOrCode?: unknown,
+  reasonArg?: unknown
+): { code?: number; reason: string } {
+  if (typeof eventOrCode === "number") {
+    return {
+      code: eventOrCode,
+      reason: closeReasonToString(reasonArg),
+    };
+  }
+
+  if (eventOrCode && typeof eventOrCode === "object") {
+    const event = eventOrCode as { code?: unknown; reason?: unknown };
+    return {
+      code: typeof event.code === "number" ? event.code : undefined,
+      reason: closeReasonToString(event.reason),
+    };
+  }
+
+  return { reason: "" };
+}
+
+function createCloseError(eventOrCode?: unknown, reasonArg?: unknown): Error {
+  const { code, reason } = getCloseDetails(eventOrCode, reasonArg);
+  const normalizedReason = reason.toLowerCase();
+
+  if (code === 1008 || normalizedReason.includes("invalid token")) {
+    return new Error(
+      "[testing-mcp] Invalid daemon token. Check TESTING_MCP_TOKEN or restart the testing-mcp bridge."
+    );
+  }
+
+  return new Error("WebSocket connection closed unexpectedly");
+}
+
 /**
  * Wait for daemon to be ready (registry file appears with valid process)
  * Returns registry info when daemon is ready, or null if timeout
  */
-async function waitForDaemon(timeout: number = 60000): Promise<{ wsPort: number; token?: string } | null> {
+async function waitForDaemon(
+  timeout: number = 60000
+): Promise<{ wsPort: number; token?: string; pid?: number } | null> {
   const startTime = Date.now();
   const pollInterval = 500; // Check every 500ms
 
@@ -117,17 +229,20 @@ async function waitForDaemon(timeout: number = 60000): Promise<{ wsPort: number;
       // Verify the process is still running
       if (isProcessRunning(registry.pid)) {
         console.log(`[testing-mcp] Daemon is ready (pid: ${registry.pid}, port: ${registry.wsPort})`);
-        return {
-          wsPort: registry.wsPort,
-          token: registry.token,
-        };
+        return registry;
       } else {
         // Registry exists but process is dead, wait for it to be cleaned up
         console.log(`[testing-mcp] Daemon process ${registry.pid} is not running, waiting...`);
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    const remaining = timeout - (Date.now() - startTime);
+    if (remaining <= 0) {
+      break;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(pollInterval, remaining))
+    );
   }
 
   return null;
@@ -140,29 +255,71 @@ async function waitForDaemon(timeout: number = 60000): Promise<{ wsPort: number;
  * @param waitTimeout Timeout for waiting for daemon (default: 60 seconds)
  */
 async function resolveConnectionInfo(
-  waitTimeout: number = 60000
-): Promise<{ port: number; token?: string }> {
+  options: ConnectOptions,
+  waitTimeout: number = 60000,
+  waitForDaemonRegistry: boolean = true
+): Promise<ResolvedConnectionInfo> {
+  const optionPort = parsePort(options.port);
+  if (optionPort !== undefined) {
+    console.log(`[testing-mcp] Using explicit daemon port ${optionPort}`);
+    return {
+      port: optionPort,
+      source: "options",
+      token: options.token ?? process.env.TESTING_MCP_TOKEN,
+    };
+  }
+
+  const envPort = parsePort(process.env.TESTING_MCP_PORT);
+  if (envPort !== undefined) {
+    console.log(`[testing-mcp] Using TESTING_MCP_PORT ${envPort}`);
+    return {
+      port: envPort,
+      source: "env",
+      token: options.token ?? process.env.TESTING_MCP_TOKEN,
+    };
+  }
+
   // 1. Auto-discovery from registry file (primary method)
   const registry = await tryReadRegistry();
   if (registry && registry.pid && isProcessRunning(registry.pid)) {
     console.log(`[testing-mcp] Auto-discovered daemon on port ${registry.wsPort}`);
-    return { port: registry.wsPort, token: registry.token };
+    return {
+      port: registry.wsPort,
+      registryPid: registry.pid,
+      source: "registry",
+      token: registry.token,
+    };
   }
 
-  // 2. Wait for daemon to be ready
-  console.log("[testing-mcp] No daemon found, waiting for daemon to start...");
-  console.log("[testing-mcp] Please start the MCP adapter (e.g., via Claude Desktop or Cursor)");
+  // 2. Wait for daemon to be ready once before falling back.
+  if (waitForDaemonRegistry) {
+    console.log("[testing-mcp] No daemon found, waiting for daemon to start...");
+    console.log("[testing-mcp] Please start the MCP adapter (e.g., via Claude Desktop or Cursor)");
 
-  const daemonInfo = await waitForDaemon(waitTimeout);
-  if (daemonInfo) {
-    return { port: daemonInfo.wsPort, token: daemonInfo.token };
+    const daemonInfo = await waitForDaemon(waitTimeout);
+    if (daemonInfo) {
+      return {
+        port: daemonInfo.wsPort,
+        registryPid: daemonInfo.pid,
+        source: "wait",
+        token: daemonInfo.token,
+        waitedForDaemon: true,
+      };
+    }
   }
 
-  // 3. Timeout - throw error
-  throw new Error(
-    `[testing-mcp] Timeout waiting for daemon. Please ensure the MCP adapter is running.\n` +
-    `Hint: Start the adapter via Claude Desktop, Cursor, or run 'npx testing-mcp bridge' manually.`
+  // 3. Fall back to the historical fixed port for manually started daemons.
+  console.log(
+    waitForDaemonRegistry
+      ? "[testing-mcp] Timeout waiting for daemon registry, falling back to port 3001"
+      : "[testing-mcp] No daemon registry found, falling back to port 3001"
   );
+  return {
+    port: 3001,
+    source: "default",
+    token: options.token ?? process.env.TESTING_MCP_TOKEN,
+    waitedForDaemon: waitForDaemonRegistry,
+  };
 }
 
 /**
@@ -197,11 +354,6 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     daemonWaitTimeout = 60000, // 60 seconds to wait for daemon
   } = options;
 
-  // Resolve connection info (with auto-discovery and waiting for daemon)
-  // This will block until daemon is ready or timeout
-  const connectionInfo = await resolveConnectionInfo(daemonWaitTimeout);
-  const { port, token } = connectionInfo;
-
   // 1. Wait for all async operations to complete
   if (waitForAsync) {
     await waitForAsyncOperations();
@@ -211,7 +363,24 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
   const state = await collectCurrentState(context, contextDescriptions);
 
   // 3. Connect to MCP Server with retry
-  await connectToServerWithRetry(port, timeout, state, context, contextDescriptions, token);
+  let waitForDaemonRegistry = true;
+  await connectToServerWithRetry(
+    async () => {
+      const connectionInfo = await resolveConnectionInfo(
+        options,
+        daemonWaitTimeout,
+        waitForDaemonRegistry
+      );
+      if (connectionInfo.waitedForDaemon) {
+        waitForDaemonRegistry = false;
+      }
+      return connectionInfo;
+    },
+    timeout,
+    state,
+    context,
+    contextDescriptions
+  );
 }
 
 /**
@@ -480,20 +649,27 @@ async function handleExecuteMessage(
  * Retries connection on failure with exponential backoff
  */
 async function connectToServerWithRetry(
-  port: number,
+  resolveConnectionInfo: () => Promise<ResolvedConnectionInfo>,
   timeout: number,
   state: TestState,
   injectedContext?: ConnectContext,
   contextDescriptions?: Record<string, string>,
-  token?: string,
   maxRetries: number = 10,
   initialDelay: number = 1000
 ): Promise<void> {
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const connectionInfo = await resolveConnectionInfo();
     try {
-      await connectToServer(port, timeout, state, injectedContext, contextDescriptions, token);
+      await connectToServer(
+        connectionInfo.port,
+        timeout,
+        state,
+        injectedContext,
+        contextDescriptions,
+        connectionInfo.token
+      );
       return; // Success
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -511,6 +687,8 @@ async function connectToServerWithRetry(
         // Not a connection error, don't retry
         throw lastError;
       }
+
+      await deleteRegistryIfMatches(connectionInfo);
 
       if (attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(1.5, attempt);
@@ -669,7 +847,7 @@ async function connectToServer(
       reject(new Error(errorMessage));
     };
 
-    const onClose = () => {
+    const onClose = (eventOrCode?: unknown, reasonArg?: unknown) => {
       clearTimeout(timeoutId);
 
       // Clean up session ID
@@ -679,7 +857,7 @@ async function connectToServer(
       // This handles unexpected disconnections
       if (!resolved) {
         resolved = true;
-        reject(new Error("WebSocket connection closed unexpectedly"));
+        reject(createCloseError(eventOrCode, reasonArg));
       }
     };
 

@@ -10,6 +10,11 @@ import * as os from "os";
  * Get the base directory for testing-mcp data files
  */
 export function getDataDir(): string {
+  const explicitDataDir = process.env.TESTING_MCP_DATA_DIR?.trim();
+  if (explicitDataDir) {
+    return path.resolve(explicitDataDir);
+  }
+
   if (process.platform === "win32") {
     const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
     return path.join(localAppData, "testing-mcp");
@@ -65,4 +70,4 @@ export const RPC_METHODS = {
 /**
  * Version info
  */
-export const VERSION = "0.5.1";
+export const VERSION = "0.5.2";

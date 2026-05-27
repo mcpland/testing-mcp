@@ -382,6 +382,9 @@ testing-mcp bridge
 # Check daemon status
 testing-mcp bridge status
 
+# Diagnose daemon registry and connectivity
+testing-mcp bridge doctor --json
+
 # Stop daemon
 testing-mcp bridge stop
 ```
@@ -396,6 +399,7 @@ Commands:
   bridge         Start the bridge daemon
   bridge stop    Stop the running daemon
   bridge status  Show daemon status
+  bridge doctor  Diagnose daemon registry and connectivity
 
 Options:
   --help, -h     Show this help message
@@ -418,9 +422,12 @@ testing-mcp bridge status
 #   PID:           12345
 #   WebSocket:     ws://127.0.0.1:53718
 #   RPC:           ws://127.0.0.1:53719
-#   Version:       0.4.0
+#   Version:       0.5.2
 #   Uptime:        5m 32s
 #   Connections:   2
+
+# Diagnose daemon health without printing secrets
+testing-mcp bridge doctor --json
 
 # Stop the daemon
 testing-mcp bridge stop
@@ -430,6 +437,8 @@ testing-mcp bridge stop
 
 - **`TESTING_MCP`**: When set to `true`, enables the WebSocket bridge to the MCP server. Leave unset to disable (automatically disabled in CI environments).
 - **`TESTING_MCP_PORT`**: Overrides the WebSocket port for test clients. In most cases, this is not needed as ports are auto-discovered from the daemon registry.
+- **`TESTING_MCP_TOKEN`**: Authentication token to use with an explicit `TESTING_MCP_PORT` or `connect({ port })` override.
+- **`TESTING_MCP_DATA_DIR`**: Overrides the daemon registry directory. Use this to isolate multiple workspaces or exploratory testing sessions.
 
 ### Port Resolution Priority
 
@@ -573,6 +582,9 @@ The registry file stores daemon connection info for auto-discovery:
 | macOS/Linux | `~/.testing-mcp/bridge.json`             |
 | Windows     | `%LOCALAPPDATA%\testing-mcp\bridge.json` |
 
+Set `TESTING_MCP_DATA_DIR=/path/to/session/.testing-mcp` to place the registry
+and lock file in a session-scoped directory.
+
 **Example registry content:**
 
 ```json
@@ -582,7 +594,7 @@ The registry file stores daemon connection info for auto-discovery:
   "rpcPort": 53719,
   "token": "abc123...",
   "startedAt": "2024-01-15T10:30:00.000Z",
-  "version": "0.4.0",
+  "version": "0.5.2",
   "protocol": 1
 }
 ```

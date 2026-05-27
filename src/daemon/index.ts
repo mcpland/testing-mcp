@@ -60,7 +60,7 @@ export class Daemon {
       // Start WebSocket server for test connections
       // Use port 0 to let OS assign an available port
       const wsPort = options.wsPort ?? 0;
-      this.connectionManager = new ConnectionManager(wsPort);
+      this.connectionManager = new ConnectionManager(wsPort, this.token);
       await this.connectionManager.waitForListening();
       const actualWsPort = this.connectionManager.getPort();
 

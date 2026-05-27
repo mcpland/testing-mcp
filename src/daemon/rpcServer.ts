@@ -4,7 +4,7 @@
  */
 
 import { WebSocketServer, WebSocket } from "ws";
-import { RPC_METHODS, RPC_CALL_TIMEOUT } from "../shared/constants.js";
+import { RPC_METHODS, RPC_CALL_TIMEOUT, VERSION } from "../shared/constants.js";
 import type {
   RPCRequest,
   RPCResponse,
@@ -167,7 +167,7 @@ export class RPCServer {
       case RPC_METHODS.PING: {
         const result: PingResult = {
           pong: true,
-          version: "0.4.0",
+          version: VERSION,
           uptime: Date.now() - this.startTime,
         };
         return result;

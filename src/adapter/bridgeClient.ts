@@ -15,6 +15,7 @@ import {
   readRegistry,
   isDaemonRunning,
   waitForDaemonReady,
+  deleteRegistry,
 } from "../daemon/registry.js";
 import type {
   RegistryInfo,
@@ -93,7 +94,7 @@ export class BridgeClient {
       }
 
       // Connect to RPC server
-      await this.connectWebSocket();
+      await this.connectWebSocketWithRecovery();
 
       this.connected = true;
       console.error(
@@ -101,6 +102,26 @@ export class BridgeClient {
       );
     } finally {
       this.connecting = false;
+    }
+  }
+
+  private async connectWebSocketWithRecovery(): Promise<void> {
+    try {
+      await this.connectWebSocket();
+      return;
+    } catch (error) {
+      if (this.options.autoStartDaemon === false) {
+        throw error;
+      }
+
+      console.error(
+        `[testing-mcp:adapter] Failed to connect to daemon RPC (${error instanceof Error ? error.message : String(error)}), restarting daemon discovery...`
+      );
+      await deleteRegistry();
+      this.registry = null;
+      await this.startDaemon();
+      this.registry = await waitForDaemonReady(DAEMON_START_TIMEOUT);
+      await this.connectWebSocket();
     }
   }
 

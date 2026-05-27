@@ -7,11 +7,12 @@
  * - bridge: Run as daemon (WebSocket + RPC server)
  * - bridge stop: Stop running daemon
  * - bridge status: Show daemon status
+ * - bridge doctor: Diagnose daemon registry and connectivity
  */
 
 import { runAdapter } from "./adapter/index.js";
 import { runDaemon, Daemon } from "./daemon/index.js";
-import { isDaemonRunning, readRegistry, deleteRegistry } from "./daemon/registry.js";
+import { checkDaemonHealth, isDaemonRunning, readRegistry, deleteRegistry } from "./daemon/registry.js";
 import { VERSION } from "./shared/constants.js";
 import { createBridgeClient } from "./adapter/bridgeClient.js";
 
@@ -30,6 +31,7 @@ Commands:
   bridge         Start the bridge daemon
   bridge stop    Stop the running daemon
   bridge status  Show daemon status
+  bridge doctor  Diagnose daemon registry and connectivity
 
 Options:
   --help, -h     Show this help message
@@ -44,6 +46,9 @@ Examples:
 
   # Check daemon status
   testing-mcp bridge status
+
+  # Diagnose daemon health as JSON
+  testing-mcp bridge doctor --json
 
   # Stop the daemon
   testing-mcp bridge stop
@@ -82,6 +87,10 @@ async function handleBridge(args: string[]): Promise<void> {
       await handleBridgeStatus();
       break;
 
+    case "doctor":
+      await handleBridgeDoctor(args.slice(1));
+      break;
+
     case undefined:
     case "start":
       // Start daemon
@@ -92,6 +101,65 @@ async function handleBridge(args: string[]): Promise<void> {
       console.error(`Unknown bridge subcommand: ${subCommand}`);
       console.error("Use 'testing-mcp bridge --help' for usage information");
       process.exit(1);
+  }
+}
+
+function wantsJson(args: string[]): boolean {
+  return args.includes("--json");
+}
+
+async function handleBridgeDoctor(args: string[]): Promise<void> {
+  const health = await checkDaemonHealth({
+    cleanup: args.includes("--cleanup"),
+  });
+  const registry = health.registry
+    ? {
+        pid: health.registry.pid,
+        protocol: health.registry.protocol,
+        rpcPort: health.registry.rpcPort,
+        startedAt: health.registry.startedAt,
+        version: health.registry.version,
+        wsPort: health.registry.wsPort,
+      }
+    : null;
+
+  if (wantsJson(args)) {
+    console.log(
+      JSON.stringify(
+        {
+          healthy: health.healthy,
+          pidAlive: health.pidAlive ?? false,
+          protocolCompatible: health.protocolCompatible ?? false,
+          reason: health.reason ?? null,
+          registry,
+          registryPath: health.registryPath,
+          rpcReachable: health.rpcReachable ?? false,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  console.log(`Status: ${health.healthy ? "Healthy" : "Unhealthy"}`);
+  console.log("");
+  console.log(`  Registry:      ${health.registryPath}`);
+  console.log(`  PID alive:     ${health.pidAlive ?? false}`);
+  console.log(`  Protocol ok:   ${health.protocolCompatible ?? false}`);
+  console.log(`  RPC reachable: ${health.rpcReachable ?? false}`);
+
+  if (registry) {
+    console.log(`  PID:           ${registry.pid}`);
+    console.log(`  WebSocket:     ws://127.0.0.1:${registry.wsPort}`);
+    console.log(`  RPC:           ws://127.0.0.1:${registry.rpcPort}`);
+    console.log(`  Version:       ${registry.version}`);
+    console.log(`  Started:       ${registry.startedAt}`);
+    console.log(`  Protocol:      v${registry.protocol}`);
+  }
+
+  if (health.reason) {
+    console.log(`  Reason:        ${health.reason}`);
   }
 }
 
