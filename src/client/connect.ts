@@ -11,6 +11,8 @@ import type {
   ContextMetadata,
 } from "../types/index.js";
 
+import { enqueueExecution, executeWithDiagnostics, executionError } from "./execution.js";
+
 // Static imports for Node.js built-in modules
 // These must be static imports to work in Jest's VM sandbox environment
 // Dynamic imports (await import()) fail in CommonJS modules running in Jest
@@ -552,96 +554,46 @@ function getCurrentTestName(): string {
 /**
  * Handle 'execute' message from server
  */
-async function handleExecuteMessage(
-  ws: any,
+function handleExecuteMessage(
+  ws: { send(payload: string): void },
   data: { executeId: string; code: string },
   injectedContext?: ConnectContext,
   contextDescriptions?: Record<string, string>
 ): Promise<void> {
-  const { executeId, code } = data;
-
-  console.log(
-    `[testing-mcp] Executing code (executeId: ${executeId}):\n${code}`
-  );
-
-  try {
-    // Check if we're in a DOM environment
-    if (typeof document === "undefined") {
-      throw new Error("Cannot execute code: no DOM environment available");
+  return enqueueExecution(async () => {
+    const { executeId, code } = data;
+    let state: TestState;
+    try {
+      if (typeof document === "undefined") {
+        throw new Error("Cannot execute code: no DOM environment available");
+      }
+      const context: ConnectContext = { ...(injectedContext ?? {}) };
+      if (context.document === undefined) context.document = document;
+      if (typeof window !== "undefined" && context.window === undefined) context.window = window;
+      const diagnostics = await executeWithDiagnostics(executeId, code, context);
+      // Retain the existing DOM-settlement interval; user code should still
+      // await act/waitFor for meaningful asynchronous assertions.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      state = {
+        ...(await collectCurrentState(injectedContext, contextDescriptions)),
+        consoleLogs: diagnostics.consoleLogs,
+        execution: diagnostics.execution,
+        errors: diagnostics.execution.error ? [diagnostics.execution.error.message] : [],
+      };
+    } catch (error) {
+      const failure = executionError(error);
+      state = {
+        ...(await collectCurrentState(injectedContext, contextDescriptions)),
+        execution: { executeId, success: false, error: failure },
+        errors: [failure.message],
+      };
     }
-
-    // Import testing-library if available
-    const context: ConnectContext = {
-      ...(injectedContext ?? {}),
-    };
-
-    // Ensure base browser globals are available if not injected
-    if (typeof document !== "undefined" && context.document === undefined) {
-      context.document = document;
+    try {
+      ws.send(JSON.stringify({ type: "executed", data: { executeId, state } }));
+    } catch (error) {
+      console.error("[testing-mcp] Could not send execution result:", error);
     }
-
-    if (typeof window !== "undefined" && context.window === undefined) {
-      context.window = window;
-    }
-
-    if (context.console === undefined) {
-      context.console = console;
-    }
-
-    // Execute the code in context
-    // Using AsyncFunction to support await
-    const AsyncFunction = Object.getPrototypeOf(
-      async function () {}
-    ).constructor;
-    const executor = new AsyncFunction(...Object.keys(context), code);
-
-    await executor(...Object.values(context));
-
-    console.log("[testing-mcp] Code executed successfully");
-
-    // Wait a bit for DOM updates
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Collect new state (including context metadata)
-    const newState = await collectCurrentState(
-      injectedContext,
-      contextDescriptions
-    );
-
-    // Send executed response back to server
-    ws.send(
-      JSON.stringify({
-        type: "executed",
-        data: {
-          executeId,
-          state: newState,
-        },
-      })
-    );
-
-    console.log(
-      `[testing-mcp] Sent executed response (executeId: ${executeId})`
-    );
-  } catch (error) {
-    console.error("[testing-mcp] Error executing code:", error);
-
-    // Send error response
-    ws.send(
-      JSON.stringify({
-        type: "executed",
-        data: {
-          executeId,
-          state: {
-            ...(await collectCurrentState(
-              injectedContext,
-              contextDescriptions
-            )),
-            errors: [error instanceof Error ? error.message : String(error)],
-          },
-        },
-      })
-    );
-  }
+  });
 }
 
 /**

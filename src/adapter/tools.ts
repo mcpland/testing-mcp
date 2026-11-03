@@ -214,9 +214,12 @@ export class MCPTools {
         timeout: 30000,
       });
 
+      const succeeded = newState.execution?.success !== false && (newState.errors?.length ?? 0) === 0;
       return {
-        success: true,
-        message: `Code executed successfully. DOM updated.`,
+        success: succeeded,
+        message: succeeded ? "Code executed successfully. DOM updated." : "Code execution failed.",
+        error: succeeded ? undefined : newState.execution?.error?.message ?? newState.errors?.join("\n"),
+        result: newState.execution?.result,
         code: params.code,
         newState: newState,
       };

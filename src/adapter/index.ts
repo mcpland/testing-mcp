@@ -142,6 +142,7 @@ export class MCPAdapter {
             const params = ExecuteTestStepSchema.parse(args);
             const result = await tools.executeTestStep(params);
             return {
+              isError: !result.success,
               content: [
                 {
                   type: "text",

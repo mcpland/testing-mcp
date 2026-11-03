@@ -176,6 +176,7 @@ describe("client/connect", () => {
         code: `
           console.error("executing");
           document.body.innerHTML = "<span>updated</span>";
+          return { updated: true };
         `,
       },
     });
@@ -191,6 +192,10 @@ describe("client/connect", () => {
         })
       ).toBe(true);
     });
+
+    const executed = ws.sentMessages.map(payload => JSON.parse(payload)).find(payload => payload.type === "executed");
+    expect(executed.data.state.execution).toEqual({ executeId: "exec-1", success: true, result: { updated: true } });
+    expect(executed.data.state.consoleLogs).toMatchObject([{ type: "error", args: ["executing"] }]);
 
     // Closing message should resolve connect()
     ws.emitMessage({ type: "close" });

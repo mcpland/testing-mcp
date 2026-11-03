@@ -42,11 +42,21 @@ export interface TestState {
   errors?: string[];
   sessionId?: string; // Session ID for tracking reconnections
   availableContext?: ContextMetadata[]; // Available context keys and their metadata
+  execution?: ExecutionResult;
+}
+
+export type DiagnosticValue = null | boolean | number | string | DiagnosticValue[] | { [key: string]: DiagnosticValue };
+
+export interface ExecutionResult {
+  executeId: string;
+  success: boolean;
+  result?: DiagnosticValue;
+  error?: { name: string; message: string; stack?: string };
 }
 
 export interface ConsoleLog {
   type: "log" | "warn" | "error" | "info" | "debug";
-  args: any[];
+  args: unknown[];
   timestamp: number;
 }
 
@@ -69,4 +79,5 @@ export interface MCPToolResponse {
   newState?: TestState;
   code?: string;
   error?: string;
+  result?: DiagnosticValue;
 }
