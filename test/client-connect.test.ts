@@ -243,6 +243,74 @@ describe("client/connect", () => {
     await connectPromise;
   });
 
+  it("rejects an already aborted session before discovering or opening a socket", async () => {
+    process.env.TESTING_MCP = "1";
+    const controller = new AbortController(); controller.abort();
+    const { connect } = await import("../src/client/connect.ts");
+    await expect(connect({ signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(await fs.readFile(registryPath, "utf8")).toContain("test-token");
+  });
+
+  it("aborts registry discovery instead of waiting for a daemon or retrying", async () => {
+    process.env.TESTING_MCP = "1";
+    await fs.rm(registryPath);
+    vi.stubGlobal("document", { body: { innerHTML: "", outerHTML: "<body />" } });
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const controller = new AbortController();
+    const { connect } = await import("../src/client/connect.ts");
+    const pending = connect({ signal: controller.signal, waitForAsync: false, daemonWaitTimeout: 60_000 });
+    const failed = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(console.log).toHaveBeenCalledWith(expect.stringContaining("Waiting for daemon")));
+    controller.abort();
+    await failed;
+    expect(MockWebSocket.instances).toHaveLength(0);
+  });
+
+  it("aborts a connected session and ignores late open or execute events", async () => {
+    process.env.TESTING_MCP = "1";
+    const document = { body: { innerHTML: "<main />", outerHTML: "<body><main /></body>" } };
+    vi.stubGlobal("document", document);
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const controller = new AbortController();
+    const { connect } = await import("../src/client/connect.ts");
+    const pending = connect({ signal: controller.signal, waitForAsync: false });
+    const failed = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const ws = MockWebSocket.instances[0];
+    ws.emit("open");
+    ws.emitMessage({ type: "connected", data: { sessionId: "cancelled-session" } });
+    controller.abort();
+    await failed;
+    ws.emit("open");
+    ws.emitMessage({ type: "execute", data: { executeId: "late", code: "document.body.innerHTML = 'late write';" } });
+    expect(document.body.innerHTML).toBe("<main />");
+    expect(ws.sentMessages).toHaveLength(1);
+    expect(process.env.TESTING_MCP_SESSION_ID).toBeUndefined();
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it("aborts retry backoff without deleting a different daemon registry", async () => {
+    process.env.TESTING_MCP = "1";
+    vi.stubGlobal("document", { body: { innerHTML: "", outerHTML: "<body />" } });
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    const controller = new AbortController();
+    const { connect } = await import("../src/client/connect.ts");
+    const pending = connect({ signal: controller.signal, waitForAsync: false });
+    const failed = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    MockWebSocket.instances[0].emit("error", new Error("ECONNREFUSED"));
+    await vi.waitFor(() => expect(console.log).toHaveBeenCalledWith(expect.stringContaining("retrying in")));
+    await fs.writeFile(registryPath, JSON.stringify({ ...mockRegistry, wsPort: 7777 }));
+    controller.abort();
+    await failed;
+    expect(JSON.parse(await fs.readFile(registryPath, "utf8")).wsPort).toBe(7777);
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
   it("uses TESTING_MCP_PORT before registry auto-discovery", async () => {
     process.env.TESTING_MCP = "1";
     process.env.TESTING_MCP_PORT = "7654";

@@ -31,6 +31,8 @@ export interface ConnectOptions {
   contextDescriptions?: Record<string, string>;
   /** Timeout for waiting for daemon to start (default: 60000ms) */
   daemonWaitTimeout?: number;
+  /** Abort this session, including discovery and retry waits, without stopping the daemon. */
+  signal?: AbortSignal;
 }
 
 export interface TestState {

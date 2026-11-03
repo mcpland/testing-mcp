@@ -12,6 +12,7 @@ import type {
 } from "../types/index.js";
 
 import { enqueueExecution, executeWithDiagnostics, executionError } from "./execution.js";
+import { abortedSession, delay, throwIfAborted } from "./abort.js";
 
 // Static imports for Node.js built-in modules
 // These must be static imports to work in Jest's VM sandbox environment
@@ -217,7 +218,8 @@ function createCloseError(eventOrCode?: unknown, reasonArg?: unknown): Error {
  * Returns registry info when daemon is ready, or null if timeout
  */
 async function waitForDaemon(
-  timeout: number = 60000
+  timeout: number = 60000,
+  signal?: AbortSignal
 ): Promise<{ wsPort: number; token?: string; pid?: number } | null> {
   const startTime = Date.now();
   const pollInterval = 500; // Check every 500ms
@@ -225,6 +227,7 @@ async function waitForDaemon(
   console.log(`[testing-mcp] Waiting for daemon to be ready (timeout: ${timeout}ms)...`);
 
   while (Date.now() - startTime < timeout) {
+    throwIfAborted(signal);
     const registry = await tryReadRegistry();
 
     if (registry && registry.pid) {
@@ -242,9 +245,7 @@ async function waitForDaemon(
     if (remaining <= 0) {
       break;
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(pollInterval, remaining))
-    );
+    await delay(Math.min(pollInterval, remaining), signal);
   }
 
   return null;
@@ -298,7 +299,7 @@ async function resolveConnectionInfo(
     console.log("[testing-mcp] No daemon found, waiting for daemon to start...");
     console.log("[testing-mcp] Please start the MCP adapter (e.g., via Claude Desktop or Cursor)");
 
-    const daemonInfo = await waitForDaemon(waitTimeout);
+    const daemonInfo = await waitForDaemon(waitTimeout, options.signal);
     if (daemonInfo) {
       return {
         port: daemonInfo.wsPort,
@@ -348,6 +349,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     return;
   }
 
+  throwIfAborted(options.signal);
   const {
     timeout = 300000, // 5 minutes
     waitForAsync = true,
@@ -358,7 +360,7 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
 
   // 1. Wait for all async operations to complete
   if (waitForAsync) {
-    await waitForAsyncOperations();
+    await waitForAsyncOperations(options.signal);
   }
 
   // 2. Collect current state (including context metadata)
@@ -381,7 +383,8 @@ export async function connect(options: ConnectOptions = {}): Promise<void> {
     timeout,
     state,
     context,
-    contextDescriptions
+    contextDescriptions,
+    options.signal
   );
 }
 
@@ -431,14 +434,15 @@ function collectContextMetadata(
 /**
  * Wait for pending async operations
  */
-async function waitForAsyncOperations(): Promise<void> {
+async function waitForAsyncOperations(signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   // Check if we're in a DOM environment
   if (typeof document === "undefined") {
     return;
   }
 
   // Simple wait for microtasks to complete
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await delay(100, signal);
 
   // TODO: More sophisticated waiting:
   // - Check for pending fetch requests
@@ -606,12 +610,14 @@ async function connectToServerWithRetry(
   state: TestState,
   injectedContext?: ConnectContext,
   contextDescriptions?: Record<string, string>,
+  signal?: AbortSignal,
   maxRetries: number = 10,
   initialDelay: number = 1000
 ): Promise<void> {
   let lastError: Error | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    throwIfAborted(signal);
     const connectionInfo = await resolveConnectionInfo();
     try {
       await connectToServer(
@@ -620,10 +626,12 @@ async function connectToServerWithRetry(
         state,
         injectedContext,
         contextDescriptions,
-        connectionInfo.token
+        connectionInfo.token,
+        signal
       );
       return; // Success
     } catch (error) {
+      throwIfAborted(signal);
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Check if it's a connection error (daemon might not be ready yet)
@@ -643,11 +651,11 @@ async function connectToServerWithRetry(
       await deleteRegistryIfMatches(connectionInfo);
 
       if (attempt < maxRetries - 1) {
-        const delay = initialDelay * Math.pow(1.5, attempt);
+        const retryDelay = initialDelay * Math.pow(1.5, attempt);
         console.log(
-          `[testing-mcp] Connection failed, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})...`
+          `[testing-mcp] Connection failed, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`
         );
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await delay(retryDelay, signal);
       }
     }
   }
@@ -664,10 +672,12 @@ async function connectToServer(
   state: TestState,
   injectedContext?: ConnectContext,
   contextDescriptions?: Record<string, string>,
-  token?: string
+  token?: string,
+  signal?: AbortSignal
 ): Promise<void> {
   // Get the appropriate WebSocket implementation
   const WSImpl = await getWebSocketImpl();
+  throwIfAborted(signal);
 
   return new Promise((resolve, reject) => {
     // Build WebSocket URL with optional token
@@ -683,12 +693,26 @@ async function connectToServer(
     const timeoutId = setTimeout(() => {
       if (resolved) return;
       resolved = true;
+      removeAbort();
       ws.close();
       reject(new Error(`Connection timeout after ${timeout}ms`));
     }, timeout);
 
+    const onAbort = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutId);
+      removeAbort();
+      delete process.env.TESTING_MCP_SESSION_ID;
+      if (ws.readyState === 0 && typeof ws.terminate === "function") ws.terminate();
+      else ws.close();
+      reject(abortedSession());
+    };
+    const removeAbort = () => signal?.removeEventListener("abort", onAbort);
+
     // Helper to handle both Node.js ws and browser WebSocket APIs
     const onOpen = () => {
+      if (resolved) return;
       console.log("[testing-mcp] Connected to server");
 
       // Send initial state
@@ -701,6 +725,7 @@ async function connectToServer(
     };
 
     const onMessage = (event: any) => {
+      if (resolved) return;
       try {
         // Handle both ws (data) and browser WebSocket (event.data)
         const dataStr =
@@ -745,6 +770,7 @@ async function connectToServer(
             `[testing-mcp] Closing connection [Session: ${sessionId}]`
           );
           clearTimeout(timeoutId);
+          removeAbort();
 
           // Clean up session ID
           delete process.env.TESTING_MCP_SESSION_ID;
@@ -754,6 +780,7 @@ async function connectToServer(
           resolve();
         } else if (message.type === "error") {
           clearTimeout(timeoutId);
+          removeAbort();
 
           // Clean up session ID
           delete process.env.TESTING_MCP_SESSION_ID;
@@ -771,6 +798,7 @@ async function connectToServer(
       if (resolved) return;
 
       clearTimeout(timeoutId);
+      removeAbort();
 
       // Clean up session ID
       delete process.env.TESTING_MCP_SESSION_ID;
@@ -801,6 +829,7 @@ async function connectToServer(
 
     const onClose = (eventOrCode?: unknown, reasonArg?: unknown) => {
       clearTimeout(timeoutId);
+      removeAbort();
 
       // Clean up session ID
       delete process.env.TESTING_MCP_SESSION_ID;
@@ -827,5 +856,7 @@ async function connectToServer(
       ws.addEventListener("error", onError);
       ws.addEventListener("close", onClose);
     }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
