@@ -15,6 +15,7 @@ Write complex integration tests with AI - AI assistants see your live page struc
 - [Configure MCP Server](#configure-mcp-server)
 - [Connect From Tests](#connect-from-tests)
 - [Execution results and cancellation](docs/execution-contract.md)
+- [Publishing to npm](docs/publishing.md)
 - [MCP Tools](#mcp-tools)
 - [Context and Available APIs](#context-and-available-apis)
 - [Multi-Client Architecture](#multi-client-architecture)
